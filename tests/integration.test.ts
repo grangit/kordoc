@@ -8,7 +8,8 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { existsSync, readFileSync } from "fs"
-import { resolve } from "path"
+import { resolve, dirname } from "path"
+import { fileURLToPath } from "url"
 import JSZip from "jszip"
 import { parse, parseHwpx, parseHwp, parsePdf, detectFormat } from "../src/index.js"
 import { toArrayBuffer } from "../src/utils.js"
@@ -49,9 +50,14 @@ function wrapSectionXml(bodyContent: string): string {
 </hs:sec>`
 }
 
-// ─── fixture 경로 ──────────────────────────────────────
+// ─── fixture 경로 (dummy = CI용 커밋됨, sample = 로컬 실제 문서) ──
 
-const FIXTURES_DIR = resolve(import.meta.dirname!, "fixtures")
+const FIXTURES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures")
+
+// CI에서도 돌아가는 dummy fixture (프로그래밍 생성, 커밋됨)
+const DUMMY_HWPX = resolve(FIXTURES_DIR, "dummy.hwpx")
+
+// 로컬 전용 실제 문서 fixture (gitignore, 있으면 추가 검증)
 const FIXTURE_HWPX = resolve(FIXTURES_DIR, "sample.hwpx")
 const FIXTURE_HWP = resolve(FIXTURES_DIR, "sample.hwp")
 const FIXTURE_PDF = resolve(FIXTURES_DIR, "sample.pdf")
@@ -196,8 +202,32 @@ describe("포맷 감지 + 에러 경로", () => {
 })
 
 // ═══════════════════════════════════════════════════════
-// 2부: 실제 문서 fixture 테스트
-// 파일이 없으면 skip — CI에서는 fixture 없이도 통과
+// 2부: dummy fixture (CI용 — 항상 실행)
+// ═══════════════════════════════════════════════════════
+
+describe("dummy fixture: HWPX 전체 파이프라인", { skip: !existsSync(DUMMY_HWPX) && "dummy fixture 없음" }, () => {
+  it("dummy HWPX → success + 텍스트 포함", async () => {
+    const buf = toArrayBuffer(readFileSync(DUMMY_HWPX))
+    const result = await parseHwpx(buf)
+
+    assert.equal(result.success, true, `파싱 실패: ${result.success === false ? result.error : ""}`)
+    if (result.success) {
+      assert.ok(result.markdown.includes("서면자문"), "핵심 텍스트 포함")
+      assert.ok(result.markdown.includes("홍길동"), "테이블 데이터 포함")
+      assert.ok(result.markdown.includes("|"), "마크다운 테이블 존재")
+    }
+  })
+
+  it("dummy HWPX → parse() 자동 감지", async () => {
+    const buf = toArrayBuffer(readFileSync(DUMMY_HWPX))
+    const result = await parse(buf)
+    assert.equal(result.success, true)
+    assert.equal(result.fileType, "hwpx")
+  })
+})
+
+// ═══════════════════════════════════════════════════════
+// 3부: 실제 문서 fixture (로컬 전용 — 없으면 skip)
 // ═══════════════════════════════════════════════════════
 
 describe("실제 문서: HWPX", { skip: !existsSync(FIXTURE_HWPX) && "fixture 없음" }, () => {
@@ -273,12 +303,17 @@ describe("실제 문서: 포맷 간 교차 검증", {
 
     // 둘 다 성공해야 비교 의미 있음
     if (hwpxResult.success && hwpResult.success) {
-      // 두 포맷 모두에 공통으로 포함될 만한 키워드 존재 확인
-      // (정확히 같을 필요는 없지만, 같은 문서라면 공통 텍스트가 있어야 함)
-      const hwpxWords = new Set(hwpxResult.markdown.match(/[가-힣]{2,}/g) || [])
-      const hwpWords = new Set(hwpResult.markdown.match(/[가-힣]{2,}/g) || [])
+      // 3글자 이상 한글 단어로 비교 (2글자는 "대한" 등 우연 매칭 가능)
+      const hwpxWords = new Set(hwpxResult.markdown.match(/[가-힣]{3,}/g) || [])
+      const hwpWords = new Set(hwpResult.markdown.match(/[가-힣]{3,}/g) || [])
+      const smaller = Math.min(hwpxWords.size, hwpWords.size)
       const common = [...hwpxWords].filter(w => hwpWords.has(w))
-      assert.ok(common.length > 0, `공통 한글 단어 없음 — HWPX: ${hwpxWords.size}개, HWP: ${hwpWords.size}개`)
+
+      // 작은 쪽 대비 10% 이상 공통 단어 — 같은 문서라면 쉽게 넘음
+      assert.ok(smaller > 0, "양쪽 모두 한글 단어가 있어야 함")
+      const ratio = common.length / smaller
+      assert.ok(ratio >= 0.1,
+        `공통 단어 비율 ${(ratio * 100).toFixed(1)}% < 10% — HWPX: ${hwpxWords.size}개, HWP: ${hwpWords.size}개, 공통: ${common.length}개`)
     }
   })
 })

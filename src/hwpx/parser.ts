@@ -46,6 +46,12 @@ export async function parseHwpxDocument(buffer: ArrayBuffer): Promise<string> {
     return extractFromBrokenZip(buffer)
   }
 
+  // loadAsync 후 실제 엔트리 수 검증 — CD 위조와 무관한 진짜 방어선
+  const actualEntryCount = Object.keys(zip.files).length
+  if (actualEntryCount > MAX_ZIP_ENTRIES) {
+    throw new KordocError("ZIP 엔트리 수 초과 (ZIP bomb 의심)")
+  }
+
   const sectionPaths = await resolveSectionPaths(zip)
   if (sectionPaths.length === 0) throw new KordocError("HWPX에서 섹션 파일을 찾을 수 없습니다")
 

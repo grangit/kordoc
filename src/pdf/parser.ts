@@ -203,11 +203,13 @@ function startsWithMarker(line: string): boolean {
 /**
  * 이전 줄이 독립 구조 헤더(법령 조항 번호 등)인지 판별.
  * 예: "제1조", "제2조(목적)", "제3장 국민의 권리" — 다음 줄과 병합하면 안 됨.
+ *
+ * 조항 번호 뒤에 괄호 제목이 오는 패턴만 허용 — 본문이 이어지는 긴 줄은 헤더 아님.
  */
 function isStandaloneHeader(line: string): boolean {
   const t = line.trim()
-  if (t.length > 40) return false                    // 긴 줄은 본문 — 헤더 아님
-  return /^제\d+[조항호장절]/.test(t)
+  // "제N조", "제N조(목적)", "제N장 총칙" 등 — 조항 번호 + 선택적 괄호/짧은 제목
+  return /^제\d+[조항호장절](\([^)]*\))?(\s+\S+){0,4}$/.test(t)
 }
 
 /**
@@ -220,7 +222,9 @@ function isStandaloneHeader(line: string): boolean {
  * 4. 이전 줄이 독립 구조 헤더가 아님
  */
 function mergeKoreanLines(text: string): string {
+  if (!text) return ""
   const lines = text.split("\n")
+  if (lines.length <= 1) return text
   const result: string[] = [lines[0]]
 
   for (let i = 1; i < lines.length; i++) {

@@ -117,4 +117,19 @@ describe("cleanPdfText", () => {
     const result = cleanPdfText(input)
     assert.ok(result.includes("\n가.첫째"), `공백 없는 한글 마커 보호: ${result}`)
   })
+
+  // ─── 독립 헤더 경계 케이스 ─────────────────────────────
+
+  it("제N조 + 긴 본문은 헤더가 아니므로 병합됨", () => {
+    // "제1조 이 법은 국민의 기본적 권리와 의무를 보장하기 위하여 제정한다" — 본문이 이어지는 긴 줄
+    const input = "제1조 이 법은 국민의 기본적 권리와 의무를 보장하기 위하여 제정한다\n다만 예외가 있다"
+    const result = cleanPdfText(input)
+    assert.ok(result.includes("제정한다 다만"), `긴 줄은 헤더 아님 → 병합: ${result}`)
+  })
+
+  it("제N조(괄호제목) 짧은 헤더는 병합 안 됨", () => {
+    const input = "제5조(적용범위)\n이 법은 모든"
+    const result = cleanPdfText(input)
+    assert.ok(result.includes("제5조(적용범위)\n이"), `짧은 조항 헤더 보호: ${result}`)
+  })
 })

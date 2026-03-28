@@ -75,5 +75,5 @@ export async function parsePdf(buffer: ArrayBuffer): Promise<ParseResult> {
 
 export { detectFormat, isHwpxFile, isOldHwpFile, isPdfFile } from "./detect.js"
 export type { ParseResult, ParseSuccess, ParseFailure, FileType, IRBlock, IRTable, IRCell, CellContext } from "./types.js"
-export { buildTable, blocksToMarkdown, convertTableToText } from "./table/builder.js"
+// buildTable, blocksToMarkdown, convertTableToText는 내부 전용 — public API에서 제거 (v1.1.1)
 export { VERSION } from "./utils.js"

@@ -133,16 +133,13 @@ interface ParseResult {
 }
 ```
 
-### Advanced Exports
-
-For custom IR pipelines or table rendering:
+### Types
 
 ```typescript
-import { buildTable, blocksToMarkdown, convertTableToText } from "kordoc"
-import type { IRBlock, IRTable, IRCell, CellContext } from "kordoc"
+import type { ParseResult, IRBlock, IRTable, IRCell, CellContext } from "kordoc"
 ```
 
-> `KordocError`, `sanitizeError`, `isPathTraversal` were removed from public API in v1.1.0. These are internal utilities.
+> Internal utilities (`KordocError`, `sanitizeError`, `isPathTraversal`, `buildTable`, `blocksToMarkdown`, `convertTableToText`) are not part of the public API.
 
 ## Requirements
 

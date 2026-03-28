@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-03-28
+
+### Fixed
+- **CI 실패 수정** — `import.meta.dirname` → `dirname(fileURLToPath(import.meta.url))` (Node 18 호환)
+- **loadAsync 후 실제 엔트리 수 검증** — CD 위조와 무관한 진짜 방어선. `Object.keys(zip.files).length > MAX_ZIP_ENTRIES` 체크 추가
+- **isStandaloneHeader 매직넘버 40 제거** — 패턴 기반 regex로 교체. "제N조(괄호제목) + 최대 4단어"까지 헤더로 인식
+- **mergeKoreanLines 빈 입력 방어** — `!text` 및 단일 줄 조기 반환
+
+### Changed
+- **`buildTable`, `blocksToMarkdown`, `convertTableToText` public API에서 제거** — 내부 전용
+- **교차 검증 테스트 강화** — "공통 단어 1개 이상" → "3글자 이상 단어 기준 10% 이상 공통 비율"
+
+### Added
+- **CI용 dummy.hwpx fixture** — 프로그래밍 생성, 커밋됨. CI에서 skip 없이 통합 테스트 실행
+
 ## [1.1.0] - 2026-03-28
 
 ### Breaking Changes

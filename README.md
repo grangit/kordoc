@@ -8,9 +8,17 @@
 
 > *HWP, HWPX, PDF — 대한민국 문서라면 남김없이 파싱해버립니다.*
 
-Built by a Korean civil servant who spent 7 years in the deepest circle of document hell. One day he snapped, and kordoc was born.
-
 [한국어](./README-KR.md)
+
+![kordoc demo](./demo.gif)
+
+---
+
+## Why kordoc?
+
+South Korea's government runs on **HWP** — a proprietary word processor the rest of the world has never heard of. Every day, 243 local governments and thousands of public institutions produce mountains of `.hwp` files. Extracting text from them has always been a nightmare: COM automation that only works on Windows, proprietary binary formats with zero documentation, and tables that break every existing parser.
+
+**kordoc** was born from that document hell. Built by a Korean civil servant who spent **7 years** buried under HWP files at a district office. One day he snapped — and decided to parse them all. Its parsers have been battle-tested across 5 real government projects, processing school curriculum plans, facility inspection reports, legal annexes, and municipal newsletters. If a Korean public servant wrote it, kordoc can parse it.
 
 ---
 

@@ -121,9 +121,16 @@ server.tool(
 
 // ─── 에러 메시지 정제 — 파일시스템 경로 노출 방지 ─────
 
+/** 알려진 kordoc 에러 메시지 패턴 — 이 패턴에 해당하면 원본 메시지를 그대로 반환 */
+const SAFE_ERROR_PATTERNS = [
+  /^(빈 버퍼|지원하지 않는|파싱 실패|암호화된|DRM 보호|FileHeader|HWP 시그니처|HWPX에서|섹션 스트림|ZIP|pdfjs-dist|PDF에|텍스��� 추출|이미지 기반|총 압축)/,
+  /^(파일 경로가|절대 경로만|확장자)/,
+]
+
 function sanitizeError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
-  return msg.replace(/[A-Za-z]:\\[^\s:]+/g, "[path]").replace(/\/(?:home|usr|tmp|var|etc)\/[^\s:]+/g, "[path]")
+  if (SAFE_ERROR_PATTERNS.some(p => p.test(msg))) return msg
+  return "문서 처리 중 오류가 발생했습니다"
 }
 
 // ─── 서버 시작 ───────────────────────────────────────

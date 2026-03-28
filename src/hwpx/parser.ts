@@ -37,10 +37,10 @@ export async function parseHwpxDocument(buffer: ArrayBuffer): Promise<string> {
     return extractFromBrokenZip(buffer)
   }
 
-  // ZIP 전체 엔트리의 선언된 비압축 크기 합산 검증 (ZIP bomb 조기 감지)
-  let declaredTotal = 0
-  zip.forEach((_, file) => { declaredTotal += (file as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0 })
-  if (declaredTotal > MAX_DECOMPRESS_SIZE) throw new Error("ZIP 비압축 크기 초과 (ZIP bomb 의심)")
+  // ZIP 전체 엔트리 수 검증 — 비정상 파일에 의한 자원 낭비 방지
+  let entryCount = 0
+  zip.forEach(() => { entryCount++ })
+  if (entryCount > MAX_ZIP_ENTRIES) throw new Error("ZIP 엔트리 수 초과 (ZIP bomb 의심)")
 
   const sectionPaths = await resolveSectionPaths(zip)
   if (sectionPaths.length === 0) throw new Error("HWPX에서 섹션 파일을 찾을 수 없습니다")

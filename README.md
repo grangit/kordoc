@@ -149,7 +149,7 @@ import type { IRBlock, IRTable, IRCell, CellContext } from "kordoc"
 
 v1.0.0 production-grade security hardening:
 
-- **ZIP bomb protection** — Pre-scan declared uncompressed sizes, 100MB decompression limit, 500 entry cap
+- **ZIP bomb protection** — Entry count validation, 100MB decompression limit, 500 entry cap
 - **XXE/Billion Laughs prevention** — Internal DTD subsets fully stripped from HWPX XML
 - **Decompression bomb guard** — `maxOutputLength` on HWP5 zlib streams, cumulative 100MB limit across sections
 - **PDF resource limits** — MAX_PAGES=5,000, cumulative text size 100MB cap, `doc.destroy()` cleanup
@@ -157,7 +157,7 @@ v1.0.0 production-grade security hardening:
 - **Table dimension clamping** — rows/cols read from HWP5 binary clamped to MAX_ROWS/MAX_COLS before allocation
 - **colSpan/rowSpan clamping** — Crafted merge values clamped to grid bounds (MAX_COLS=200, MAX_ROWS=10,000)
 - **Path traversal guard** — Backslash normalization, `..`, absolute paths, Windows drive letters all rejected
-- **MCP error sanitization** — Filesystem paths stripped from error messages returned to clients
+- **MCP error sanitization** — Allowlist-based error filtering, unknown errors return generic message
 - **MCP path restriction** — Only `.hwp`, `.hwpx`, `.pdf` extensions allowed, symlink resolution
 - **File size limit** — 500MB max in MCP server and CLI
 - **HWP5 section limit** — Max 100 sections in both primary and fallback paths

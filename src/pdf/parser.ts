@@ -3,15 +3,12 @@
 import type { ParseResult } from "../types.js"
 import { KordocError } from "../utils.js"
 
-/** 최대 처리 페이지 수 — OOM 방지 */
 const MAX_PAGES = 5000
-/** 누적 텍스트 최대 크기 (100MB) — 메모리 폭주 방지 */
 const MAX_TOTAL_TEXT = 100 * 1024 * 1024
 
 import { createRequire } from "module"
 import { pathToFileURL } from "url"
 
-// pdfjs-dist는 external로 빌드됨 — 설치 안 되어 있으면 런타임에 잡힘
 interface PdfjsModule {
   getDocument: (opts: Record<string, unknown>) => { promise: Promise<PdfjsDocument> }
   GlobalWorkerOptions: { workerSrc: string }
@@ -31,24 +28,28 @@ interface PdfjsTextItem {
   height: number
 }
 
+interface NormItem {
+  text: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 let pdfjsModule: PdfjsModule | null = null
 
 async function loadPdfjs(): Promise<PdfjsModule | null> {
   if (pdfjsModule) return pdfjsModule
   try {
     const mod = await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfjsModule
-    // 워커 경로를 file:// URL로 설정 (Node.js ESM 환경 필수)
     const req = createRequire(import.meta.url)
     const workerPath = req.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs")
     mod.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href
     pdfjsModule = mod
     return mod
   } catch (err) {
-    // import 실패 원인을 구분하여 반환
     const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes("Cannot find") || msg.includes("MODULE_NOT_FOUND")) {
-      return null // 미설치
-    }
+    if (msg.includes("Cannot find") || msg.includes("MODULE_NOT_FOUND")) return null
     throw new KordocError(`pdfjs-dist 로딩 실패: ${msg}`)
   }
 }
@@ -56,17 +57,11 @@ async function loadPdfjs(): Promise<PdfjsModule | null> {
 export async function parsePdfDocument(buffer: ArrayBuffer): Promise<ParseResult> {
   const pdfjs = await loadPdfjs()
   if (!pdfjs) {
-    return {
-      success: false,
-      fileType: "pdf",
-      pageCount: 0,
-      error: "pdfjs-dist가 설치되지 않았습니다. npm install pdfjs-dist",
-    }
+    return { success: false, fileType: "pdf", pageCount: 0, error: "pdfjs-dist가 설치되지 않았습니다. npm install pdfjs-dist" }
   }
 
-  const data = new Uint8Array(buffer)
   const doc = await pdfjs.getDocument({
-    data,
+    data: new Uint8Array(buffer),
     useSystemFonts: true,
     disableFontFace: true,
     isEvalSupported: false,
@@ -74,9 +69,7 @@ export async function parsePdfDocument(buffer: ArrayBuffer): Promise<ParseResult
 
   try {
     const pageCount = doc.numPages
-    if (pageCount === 0) {
-      return { success: false, fileType: "pdf", pageCount: 0, error: "PDF에 페이지가 없습니다." }
-    }
+    if (pageCount === 0) return { success: false, fileType: "pdf", pageCount: 0, error: "PDF에 페이지가 없습니다." }
 
     const pageTexts: string[] = []
     let totalChars = 0
@@ -85,143 +78,384 @@ export async function parsePdfDocument(buffer: ArrayBuffer): Promise<ParseResult
 
     for (let i = 1; i <= effectivePageCount; i++) {
       const page = await doc.getPage(i)
-      const textContent = await page.getTextContent()
-      const lines = groupTextItemsByLine(textContent.items)
-      const pageText = lines.join("\n")
+      const tc = await page.getTextContent()
+      const pageText = extractPageContent(tc.items)
       totalChars += pageText.replace(/\s/g, "").length
       totalTextBytes += pageText.length * 2
-      if (totalTextBytes > MAX_TOTAL_TEXT) throw new KordocError(`텍스트 추출 크기 초과 (${MAX_TOTAL_TEXT / 1024 / 1024}MB 제한)`)
+      if (totalTextBytes > MAX_TOTAL_TEXT) throw new KordocError("텍스트 추출 크기 초과")
       pageTexts.push(pageText)
     }
 
-    const avgCharsPerPage = totalChars / effectivePageCount
-    if (avgCharsPerPage < 10) {
-      return {
-        success: false,
-        fileType: "pdf",
-        pageCount,
-        isImageBased: true,
-        error: `이미지 기반 PDF로 추정됩니다 (${pageCount}페이지, 추출 텍스트 ${totalChars}자).`,
-      }
+    if (totalChars / effectivePageCount < 10) {
+      return { success: false, fileType: "pdf", pageCount, isImageBased: true, error: `이미지 기반 PDF (${pageCount}페이지, ${totalChars}자)` }
     }
 
-    let markdown = ""
-    for (let i = 0; i < pageTexts.length; i++) {
-      const cleaned = cleanPdfText(pageTexts[i])
-      if (cleaned.trim()) {
-        if (i > 0 && markdown) markdown += "\n\n"
-        markdown += cleaned
-      }
-    }
+    let markdown = pageTexts.filter(t => t.trim()).join("\n\n")
+    markdown = cleanPdfText(markdown)
 
-    markdown = reconstructTables(markdown)
-
-    const truncated = pageCount > MAX_PAGES
-    return { success: true, fileType: "pdf", markdown, pageCount: effectivePageCount, isImageBased: false, ...(truncated && { warning: `PDF가 ${pageCount}페이지이지만 ${MAX_PAGES}페이지까지만 처리했습니다` }) }
+    return { success: true, fileType: "pdf", markdown, pageCount: effectivePageCount }
   } finally {
     await doc.destroy().catch(() => {})
   }
 }
 
-// ─── 텍스트 아이템 → 행 그룹핑 ──────────────────────
+// ═══════════════════════════════════════════════════════
+// 페이지 콘텐츠 추출 (열 경계 학습 기반 테이블 감지)
+// ═══════════════════════════════════════════════════════
 
-function groupTextItemsByLine(items: PdfjsTextItem[]): string[] {
-  if (items.length === 0) return []
+function extractPageContent(rawItems: PdfjsTextItem[]): string {
+  const items = normalizeItems(rawItems)
+  if (items.length === 0) return ""
 
-  const textItems = items.filter(item => typeof item.str === "string" && item.str.trim() !== "")
-  if (textItems.length === 0) return []
+  const yLines = groupByY(items)
+  const columns = detectColumns(yLines)
 
-  textItems.sort((a, b) => {
-    const yDiff = b.transform[5] - a.transform[5]
-    if (Math.abs(yDiff) < 2) return a.transform[4] - b.transform[4]
-    return yDiff
-  })
-
-  const lines: string[] = []
-  let currentY = textItems[0].transform[5]
-  let currentLine: { text: string; x: number; width: number }[] = []
-
-  for (const item of textItems) {
-    const y = item.transform[5]
-
-    if (Math.abs(currentY - y) > Math.max(item.height * 0.5, 2)) {
-      if (currentLine.length > 0) lines.push(mergeLineItems(currentLine))
-      currentLine = []
-      currentY = y
-    }
-
-    currentLine.push({ text: item.str, x: item.transform[4], width: item.width })
+  if (columns && columns.length >= 3) {
+    return extractWithColumns(yLines, columns)
   }
 
-  if (currentLine.length > 0) lines.push(mergeLineItems(currentLine))
+  // 테이블 없으면 기존 방식
+  return yLines.map(line => mergeLineSimple(line)).join("\n")
+}
+
+function normalizeItems(rawItems: PdfjsTextItem[]): NormItem[] {
+  return rawItems
+    .filter(i => typeof i.str === "string" && i.str.trim() !== "")
+    .map(i => ({
+      text: i.str.trim(),
+      x: Math.round(i.transform[4]),
+      y: Math.round(i.transform[5]),
+      w: Math.round(i.width),
+      h: Math.round(i.height),
+    }))
+    .sort((a, b) => b.y - a.y || a.x - b.x)
+}
+
+function groupByY(items: NormItem[]): NormItem[][] {
+  if (items.length === 0) return []
+  const lines: NormItem[][] = []
+  let curY = items[0].y
+  let curLine: NormItem[] = [items[0]]
+
+  for (let i = 1; i < items.length; i++) {
+    if (Math.abs(items[i].y - curY) > 3) {
+      lines.push(curLine)
+      curLine = []
+      curY = items[i].y
+    }
+    curLine.push(items[i])
+  }
+  if (curLine.length > 0) lines.push(curLine)
   return lines
 }
 
-function mergeLineItems(items: { text: string; x: number; width: number }[]): string {
-  if (items.length <= 1) return items[0]?.text || ""
-  items.sort((a, b) => a.x - b.x)
+// ═══════════════════════════════════════════════════════
+// 열 경계 감지 — 빈도 기반 x-히스토그램 클러스터링
+// ═══════════════════════════════════════════════════════
 
-  let result = items[0].text
-  for (let i = 1; i < items.length; i++) {
-    const gap = items[i].x - (items[i - 1].x + items[i - 1].width)
+/** prose 라인 판별: 아이템 간 gap이 모두 작으면 문장 (단어 나열) */
+function isProseSpread(items: NormItem[]): boolean {
+  if (items.length < 4) return false
+  const sorted = [...items].sort((a, b) => a.x - b.x)
+  const gaps: number[] = []
+  for (let i = 1; i < sorted.length; i++) {
+    gaps.push(sorted[i].x - (sorted[i - 1].x + sorted[i - 1].w))
+  }
+  // gap의 표준편차가 작고 최대 gap이 작으면 prose
+  const maxGap = Math.max(...gaps)
+  const avgLen = items.reduce((s, i) => s + i.text.length, 0) / items.length
+  // 짧은 단어들이 좁은 간격으로 나열 = prose (예: "위 표 제3호나목에서 남은 유효기간...")
+  return maxGap < 40 && avgLen < 5
+}
+
+function detectColumns(yLines: NormItem[][]): number[] | null {
+  const allItems = yLines.flat()
+  if (allItems.length === 0) return null
+  const pageWidth = Math.max(...allItems.map(i => i.x + i.w)) - Math.min(...allItems.map(i => i.x))
+  if (pageWidth < 100) return null
+
+  // "비고" 이전 아이템만 사용 (비고 이후는 prose)
+  let bigoLineIdx = -1
+  for (let i = 0; i < yLines.length; i++) {
+    if (yLines[i].length <= 2 && yLines[i].some(item => item.text === "비고")) {
+      bigoLineIdx = i
+      break
+    }
+  }
+  const tableYLines = bigoLineIdx >= 0 ? yLines.slice(0, bigoLineIdx) : yLines
+
+  // Step 1: 모든 아이템의 x를 수집 (prose 라인 제외)
+  const CLUSTER_TOL = 22
+  const xClusters: { center: number; count: number; minX: number }[] = []
+
+  for (const line of tableYLines) {
+    if (isProseSpread(line)) continue
+    for (const item of line) {
+      let found = false
+      for (const c of xClusters) {
+        if (Math.abs(item.x - c.center) <= CLUSTER_TOL) {
+          c.center = Math.round((c.center * c.count + item.x) / (c.count + 1))
+          c.minX = Math.min(c.minX, item.x)
+          c.count++
+          found = true
+          break
+        }
+      }
+      if (!found) {
+        xClusters.push({ center: item.x, count: 1, minX: item.x })
+      }
+    }
+  }
+
+  // Step 2: 빈도 피크 — 최소 3회 이상 등장 (노이즈 제거)
+  const peaks = xClusters
+    .filter(c => c.count >= 3)
+    .sort((a, b) => a.minX - b.minX)
+
+  if (peaks.length < 3) return null
+
+  // Step 3: 가까운 피크 병합 (간격 < 30)
+  const MERGE_TOL = 30
+  const merged: { center: number; count: number; minX: number }[] = [peaks[0]]
+  for (let i = 1; i < peaks.length; i++) {
+    const prev = merged[merged.length - 1]
+    if (peaks[i].minX - prev.minX < MERGE_TOL) {
+      // 빈도 높은 쪽 유지, 최소 x는 작은 값
+      if (peaks[i].count > prev.count) {
+        prev.center = peaks[i].center
+      }
+      prev.count += peaks[i].count
+      prev.minX = Math.min(prev.minX, peaks[i].minX)
+    } else {
+      merged.push({ ...peaks[i] })
+    }
+  }
+
+  // 열 경계 = 각 클러스터의 minX (왼쪽 정렬 기준)
+  const columns = merged.filter(c => c.count >= 3).map(c => c.minX)
+  return columns.length >= 3 ? columns : null
+}
+
+function findColumn(x: number, columns: number[]): number {
+  for (let i = columns.length - 1; i >= 0; i--) {
+    if (x >= columns[i] - 10) return i
+  }
+  return 0
+}
+
+// ═══════════════════════════════════════════════════════
+// 열 기반 추출 — 테이블/텍스트 영역 분리
+// ═══════════════════════════════════════════════════════
+
+function extractWithColumns(yLines: NormItem[][], columns: number[]): string {
+  const result: string[] = []
+  const colMin = columns[0]
+  const colMax = columns[columns.length - 1]
+
+  // "비고" 라인 감지 — 이후는 텍스트로 처리
+  let bigoIdx = -1
+  for (let i = 0; i < yLines.length; i++) {
+    if (yLines[i].length <= 2 && yLines[i].some(item => item.text === "비고")) {
+      bigoIdx = i
+      break
+    }
+  }
+
+  // 테이블 시작: 첫 번째 다열(3+ 열 사용) 라인
+  let tableStart = -1
+  for (let i = 0; i < (bigoIdx >= 0 ? bigoIdx : yLines.length); i++) {
+    const usedCols = new Set(yLines[i].map(item => findColumn(item.x, columns)))
+    if (usedCols.size >= 3) {
+      tableStart = i
+      break
+    }
+  }
+
+  const tableEnd = bigoIdx >= 0 ? bigoIdx : yLines.length
+
+  // 테이블 시작 이전 = 텍스트
+  for (let i = 0; i < (tableStart >= 0 ? tableStart : tableEnd); i++) {
+    result.push(mergeLineSimple(yLines[i]))
+  }
+
+  // 테이블 영역: 모든 라인을 그리드에 포함 (단일 아이템 라인도)
+  if (tableStart >= 0) {
+    const tableLines = yLines.slice(tableStart, tableEnd)
+    // 테이블 x범위 밖의 라인만 텍스트로 분리
+    const gridLines: NormItem[][] = []
+    for (const line of tableLines) {
+      const inRange = line.some(item =>
+        item.x >= colMin - 20 && item.x <= colMax + 200
+      )
+      if (inRange && !isProseSpread(line)) {
+        gridLines.push(line)
+      } else {
+        // 그리드 밖 라인은 현재까지 축적된 그리드 출력 후 텍스트로
+        if (gridLines.length > 0) {
+          result.push(buildGridTable(gridLines.splice(0), columns))
+        }
+        result.push(mergeLineSimple(line))
+      }
+    }
+    if (gridLines.length > 0) {
+      result.push(buildGridTable(gridLines, columns))
+    }
+  }
+
+  // 비고 영역
+  if (bigoIdx >= 0) {
+    result.push("")
+    for (let i = bigoIdx; i < yLines.length; i++) {
+      result.push(mergeLineSimple(yLines[i]))
+    }
+  }
+
+  return result.join("\n")
+}
+
+// ═══════════════════════════════════════════════════════
+// 그리드 테이블 빌더 — y-라인을 열에 배치 후 행 병합
+// ═══════════════════════════════════════════════════════
+
+function buildGridTable(lines: NormItem[][], columns: number[]): string {
+  const numCols = columns.length
+
+  // Step 1: 각 y-라인을 열에 배치
+  const yRows: string[][] = lines.map(items => {
+    const row = Array(numCols).fill("")
+    for (const item of items) {
+      const col = findColumn(item.x, columns)
+      row[col] = row[col] ? row[col] + " " + item.text : item.text
+    }
+    return row
+  })
+
+  // Step 2: 행 병합 — 새 논리적 행 판별
+  // 데이터 열 기준점 (가격 등이 들어가는 오른쪽 열들)
+  const dataColStart = Math.max(2, Math.floor(numCols / 2))
+  const merged: string[][] = []
+
+  for (const row of yRows) {
+    if (row.every(c => c === "")) continue
+
+    if (merged.length === 0) {
+      merged.push([...row])
+      continue
+    }
+
+    const prev = merged[merged.length - 1]
+    const filledCols = row.map((c, i) => c ? i : -1).filter(i => i >= 0)
+    const filledCount = filledCols.length
+
+    let isNewRow = false
+
+    // Rule 1: col 0에 텍스트 (3글자 이상) → 새 행 (단, "권"처럼 짧은 건 continuation)
+    if (row[0] && row[0].length >= 3) {
+      isNewRow = true
+    }
+
+    // Rule 2: col 1에 텍스트 → 항상 새 행 (새 항목 시작)
+    if (!isNewRow && numCols > 1 && row[1]) {
+      isNewRow = true
+    }
+
+    // Rule 3: 데이터 열(3+)에 새 값이 있고 이전 행 데이터 열에도 이미 값 있음 → 새 가격 행
+    if (!isNewRow) {
+      const hasData = row.slice(dataColStart).some(c => c !== "")
+      const prevHasData = prev.slice(dataColStart).some(c => c !== "")
+      if (hasData && prevHasData) {
+        isNewRow = true
+      }
+    }
+
+    // Exception: filledCount=1이고 col 0에 짧은 텍스트(≤2자) → word continuation (예: "권", "여권")
+    if (isNewRow && filledCount === 1 && row[0] && row[0].length <= 2) {
+      isNewRow = false
+    }
+
+    if (isNewRow) {
+      merged.push([...row])
+    } else {
+      for (let c = 0; c < numCols; c++) {
+        if (row[c]) {
+          prev[c] = prev[c] ? prev[c] + " " + row[c] : row[c]
+        }
+      }
+    }
+  }
+
+  if (merged.length < 2) {
+    return merged.map(r => r.filter(c => c).join(" ")).join("\n")
+  }
+
+  // Step 3: 헤더 행 병합 — 첫 N행이 모두 데이터열(dataColStart+)에 값이 없으면 헤더
+  let headerEnd = 0
+  for (let r = 0; r < merged.length; r++) {
+    const hasDataValues = merged[r].slice(dataColStart).some(c => c && /\d/.test(c))
+    if (hasDataValues) break
+    headerEnd = r + 1
+  }
+
+  if (headerEnd > 1) {
+    // 헤더 행들을 하나로 합침
+    const headerRow = Array(numCols).fill("")
+    for (let r = 0; r < headerEnd; r++) {
+      for (let c = 0; c < numCols; c++) {
+        if (merged[r][c]) {
+          headerRow[c] = headerRow[c] ? headerRow[c] + " " + merged[r][c] : merged[r][c]
+        }
+      }
+    }
+    merged.splice(0, headerEnd, headerRow)
+  }
+
+  // Step 4: 마크다운 테이블
+  const md: string[] = []
+  md.push("| " + merged[0].join(" | ") + " |")
+  md.push("| " + merged[0].map(() => "---").join(" | ") + " |")
+  for (let r = 1; r < merged.length; r++) {
+    md.push("| " + merged[r].join(" | ") + " |")
+  }
+  return md.join("\n")
+}
+
+// ═══════════════════════════════════════════════════════
+// 유틸
+// ═══════════════════════════════════════════════════════
+
+function mergeLineSimple(items: NormItem[]): string {
+  if (items.length <= 1) return items[0]?.text || ""
+  const sorted = [...items].sort((a, b) => a.x - b.x)
+  let result = sorted[0].text
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i].x - (sorted[i - 1].x + sorted[i - 1].w)
     if (gap > 15) result += "\t"
     else if (gap > 3) result += " "
-    result += items[i].text
+    result += sorted[i].text
   }
   return result
 }
 
-/**
- * PDF 텍스트 후처리 — 페이지 번호 제거, 한국어 줄 병합, 빈 줄 정규화.
- */
 export function cleanPdfText(text: string): string {
-  const stripped = text
-    .replace(/^[\s]*[-–—]\s*\d+\s*[-–—][\s]*$/gm, "")   // 페이지 번호: - 1 -, — 25 —
-    .replace(/^\s*\d+\s*\/\s*\d+\s*$/gm, "")             // 페이지 번호: 3 / 10
-
-  return mergeKoreanLines(stripped)
+  return mergeKoreanLines(
+    text
+      .replace(/^[\s]*[-–—]\s*\d+\s*[-–—][\s]*$/gm, "")
+      .replace(/^\s*\d+\s*\/\s*\d+\s*$/gm, "")
+  )
     .replace(/\n{3,}/g, "\n\n")
     .trim()
 }
 
-// ─── 한국어 줄 병합 ─────────────────────────────────────
-
-/**
- * 다음 줄이 리스트/번호/구조 마커로 시작하는지 판별.
- * 이 패턴들은 한국 공문서에서 독립 항목이므로 이전 줄과 병합하면 안 됨.
- */
 function startsWithMarker(line: string): boolean {
   const t = line.trimStart()
-  if (/^[가-힣ㄱ-ㅎ][.)]/.test(t)) return true     // 한글 번호: 가. 나) 다.
-  if (/^\d+[.)]/.test(t)) return true               // 숫자 번호: 1. 2) 3.
-  if (/^\([가-힣ㄱ-ㅎ\d]+\)/.test(t)) return true   // 괄호 번호: (1) (가)
-  if (/^[○●※▶▷◆◇■□★☆\-·]\s/.test(t)) return true // 기호 마커: ○ ● ※ ▶ - ·
-  if (/^제\d+[조항호장절]/.test(t)) return true      // 법령 조항: 제1조, 제2항, 제3호
-  return false
+  return /^[가-힣ㄱ-ㅎ][.)]/.test(t) || /^\d+[.)]/.test(t) || /^\([가-힣ㄱ-ㅎ\d]+\)/.test(t) ||
+    /^[○●※▶▷◆◇■□★☆\-·]\s/.test(t) || /^제\d+[조항호장절]/.test(t)
 }
 
-/**
- * 이전 줄이 독립 구조 헤더(법령 조항 번호 등)인지 판별.
- * 예: "제1조", "제2조(목적)", "제3장 국민의 권리" — 다음 줄과 병합하면 안 됨.
- *
- * 조항 번호 뒤에 괄호 제목이 오는 패턴만 허용 — 본문이 이어지는 긴 줄은 헤더 아님.
- */
 function isStandaloneHeader(line: string): boolean {
-  const t = line.trim()
-  // "제N조", "제N조(목적)", "제1장 국민의 기본적 권리와 의무" 등
-  // 조항 번호 + 선택적 괄호 + 짧은 제목(최대 7단어 — 실제 법령 장 제목 커버)
-  return /^제\d+[조항호장절](\([^)]*\))?(\s+\S+){0,7}$/.test(t)
+  return /^제\d+[조항호장절](\([^)]*\))?(\s+\S+){0,7}$/.test(line.trim())
 }
 
-/**
- * 한국어 문단 줄 병합 — 리스트/번호/법령 마커 보호.
- *
- * 병합 조건:
- * 1. 이전 줄이 한글/구두점(·,-)으로 끝남
- * 2. 다음 줄이 한글/여는괄호로 시작
- * 3. 다음 줄이 리스트/구조 마커가 아님
- * 4. 이전 줄이 독립 구조 헤더가 아님
- */
 function mergeKoreanLines(text: string): string {
   if (!text) return ""
   const lines = text.split("\n")
@@ -231,59 +465,11 @@ function mergeKoreanLines(text: string): string {
   for (let i = 1; i < lines.length; i++) {
     const prev = result[result.length - 1]
     const curr = lines[i]
-
-    const shouldMerge =
-      /[가-힣·,\-]$/.test(prev) &&
-      /^[가-힣(]/.test(curr) &&
-      !startsWithMarker(curr) &&
-      !isStandaloneHeader(prev)
-
-    if (shouldMerge) {
+    if (/[가-힣·,\-]$/.test(prev) && /^[가-힣(]/.test(curr) && !startsWithMarker(curr) && !isStandaloneHeader(prev)) {
       result[result.length - 1] = prev + " " + curr
     } else {
       result.push(curr)
     }
   }
-
   return result.join("\n")
-}
-
-function reconstructTables(text: string): string {
-  const lines = text.split("\n")
-  const result: string[] = []
-  let tableBuffer: string[][] = []
-
-  for (const line of lines) {
-    if (line.includes("\t")) {
-      tableBuffer.push(line.split("\t").map(c => c.trim()))
-    } else {
-      if (tableBuffer.length >= 2) result.push(formatAsMarkdownTable(tableBuffer))
-      else if (tableBuffer.length === 1) result.push(tableBuffer[0].join(" | "))
-      tableBuffer = []
-      result.push(line)
-    }
-  }
-
-  if (tableBuffer.length >= 2) result.push(formatAsMarkdownTable(tableBuffer))
-  else if (tableBuffer.length === 1) result.push(tableBuffer[0].join(" | "))
-
-  return result.join("\n")
-}
-
-function formatAsMarkdownTable(rows: string[][]): string {
-  const maxCols = Math.max(...rows.map(r => r.length))
-  // defensive copy — 원본 배열 변경 방지
-  const normalized = rows.map(r => {
-    const copy = [...r]
-    while (copy.length < maxCols) copy.push("")
-    return copy
-  })
-
-  const lines: string[] = []
-  lines.push("| " + normalized[0].join(" | ") + " |")
-  lines.push("| " + normalized[0].map(() => "---").join(" | ") + " |")
-  for (let i = 1; i < normalized.length; i++) {
-    lines.push("| " + normalized[i].join(" | ") + " |")
-  }
-  return lines.join("\n")
 }

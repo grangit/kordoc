@@ -148,14 +148,14 @@ describe("precheckZipSize — parseHwpxDocument 간접 검증", () => {
     )
   })
 
-  it("CD 엔트리 수 초과 → ZIP bomb 에러", () => {
+  it("CD 엔트리 수 초과 → ZIP bomb 에러", async () => {
     // 501개 엔트리를 CD에 선언한 ZIP 생성
     const entries = Array.from({ length: 501 }, (_, i) => ({
       name: `f${i}.xml`,
       uncompressedSize: 100,
     }))
     const zip = makeMinimalZip(entries)
-    assert.rejects(
+    await assert.rejects(
       () => parseHwpxDocument(zip),
       (err: Error) => err.message.includes("ZIP 엔트리 수 초과"),
     )

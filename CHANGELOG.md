@@ -5,103 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-03-28
+
+### Breaking Changes
+- **IR 타입 export 제거** — `IRBlock`, `IRTable`, `IRCell`, `CellContext`를 public API에서 제거. `buildTable` 등 IR 조작 함수가 이미 제거되었으므로 일관성 확보.
+
+### Fixed
+- **`assert.rejects` await 누락 수정** — precheckZipSize 간접 테스트에서 엔트리 수 초과 검증이 실제로 실행되지 않던 버그
+- **isStandaloneHeader 단어 제한 완화** — 4단어 → 7단어. "제1장 국민의 기본적 권리와 의무" 등 실제 법령 장 제목 커버
+- **README-KR.md API 섹션 추가** — 영문 README와 동기화 (ParseResult 인터페이스, 타입 export, internal 안내)
+
 ## [1.1.1] - 2026-03-28
 
 ### Fixed
-- **CI 실패 수정** — `import.meta.dirname` → `dirname(fileURLToPath(import.meta.url))` (Node 18 호환)
-- **loadAsync 후 실제 엔트리 수 검증** — CD 위조와 무관한 진짜 방어선. `Object.keys(zip.files).length > MAX_ZIP_ENTRIES` 체크 추가
-- **isStandaloneHeader 매직넘버 40 제거** — 패턴 기반 regex로 교체. "제N조(괄호제목) + 최대 4단어"까지 헤더로 인식
+- **CI Node 18 호환** — `import.meta.dirname` → `dirname(fileURLToPath(import.meta.url))`
+- **loadAsync 후 실제 엔트리 수 검증** — CD 위조와 무관한 진짜 방어선 추가
+- **isStandaloneHeader 매직넘버 40 제거** — 패턴 기반 regex로 교체
 - **mergeKoreanLines 빈 입력 방어** — `!text` 및 단일 줄 조기 반환
 
 ### Changed
-- **`buildTable`, `blocksToMarkdown`, `convertTableToText` public API에서 제거** — 내부 전용
-- **교차 검증 테스트 강화** — "공통 단어 1개 이상" → "3글자 이상 단어 기준 10% 이상 공통 비율"
+- **`buildTable`, `blocksToMarkdown`, `convertTableToText` public API 제거** — 내부 전용
+- **교차 검증 테스트 강화** — 3글자 이상 단어 기준 10% 이상 공통 비율
 
 ### Added
-- **CI용 dummy.hwpx fixture** — 프로그래밍 생성, 커밋됨. CI에서 skip 없이 통합 테스트 실행
+- **CI용 dummy.hwpx fixture** — 프로그래밍 생성, 커밋됨
 
 ## [1.1.0] - 2026-03-28
 
 ### Breaking Changes
-- **`KordocError`, `sanitizeError`, `isPathTraversal`을 public API에서 제거** — 내부 유틸이므로 `import { ... } from "kordoc"`으로 접근 불가. 테스트는 `../src/utils.js` 직접 import 사용.
+- **`KordocError`, `sanitizeError`, `isPathTraversal`을 public API에서 제거**
 
 ### Changed
-- **cleanPdfText 한국어 줄 병합 개선** — 150자 regex를 3개 함수(`startsWithMarker`, `isStandaloneHeader`, `mergeKoreanLines`)로 분리. 한글 번호(가./나.), 숫자(1./2.), 괄호((1)/(가)), 기호(○/●/※), 법령 조항(제N조/항/호) 패턴 보호. 마커 뒤 공백 없는 케이스도 보호.
-- **precheckZipSize 안전성 강화** — try/catch 추가 (악성 버퍼의 RangeError 방어), 22바이트 미만 버퍼 조기 반환, `@internal` 태그 명시
+- **cleanPdfText 한국어 줄 병합 리팩토링** — 150자 regex를 3개 함수로 분리. 한글 번호, 숫자, 괄호, 기호, 법령 조항(제N조/항/호) 패턴 보호
+- **precheckZipSize 안전성 강화** — try/catch, 22바이트 미만 버퍼 조기 반환, `@internal` 태그
 
 ### Added
-- **실제 문서 통합 테스트** — `tests/fixtures/`에 있는 실제 .hwp, .hwpx, .pdf 파일로 전체 파이프라인 검증 (fixture 없으면 skip)
-- **합성 HWPX 통합 테스트** — 마크다운 테이블 구조 정밀 검증 (헤더/구분선/데이터 행), 멀티 섹션 순서, 단락 구분 등
-- **precheckZipSize 단위 테스트** 10개 — EOCD/CD 파싱, 경계 조건, 악성 입력, parseHwpxDocument 간접 검증
-- **cleanPdfText 테스트** 5개 추가 — 제N조, 공백 없는 마커, 기호 마커
-
-### Fixed
-- README 보안 섹션에 **ZIP bomb 한계를 사용자 대면으로 명시** — CD 선언 크기 위조 가능성, 실제 방어선(per-file 누적 체크) 설명
+- **실제 문서 통합 테스트** — .hwp, .hwpx, .pdf 파일 전체 파이프라인 검증 + 포맷 간 교차 검증
+- **합성 HWPX 통합 테스트** — 마크다운 테이블 구조 정밀 검증, 멀티 섹션 순서 등
+- **precheckZipSize 단위 테스트** 10개 — EOCD/CD 파싱, 경계 조건, 악성 입력
+- README 보안 섹션에 **ZIP bomb 한계 명시**
 
 ## [1.0.2] - 2026-03-28
 
 ### Changed
-- **KordocError 클래스 도입** — 모든 파서가 `KordocError`를 throw, MCP `sanitizeError`가 `instanceof`로 판별. 문자열 패턴 매칭 제거
-- **JSZip ZIP bomb 사전 검증** — `loadAsync` 전 raw buffer에서 Central Directory를 직접 파싱하여 선언된 비압축 크기 합산 검증
-- **toArrayBuffer 최적화** — offset=0이고 전체 ArrayBuffer를 차지하면 복사 없이 직접 반환
-- **sanitizeError, isPathTraversal을 utils.ts로 이동** — 테스트가 실제 코드를 직접 import하여 검증
+- **KordocError 클래스 도입** — 모든 파서 에러 통합, MCP `sanitizeError` instanceof 판별
+- **JSZip ZIP bomb 사전 검증** — loadAsync 전 Central Directory 직접 파싱
+- **toArrayBuffer 최적화** — zero-copy 경로 추가
 
 ### Fixed
-- cfb 버전을 정확히 핀 (`^1.2.2` → `1.2.2`), 번들링 일관성 확보
-- `@types/node` `^25` → `^18`로 다운그레이드, engines `>=18`과 일치
-- CHANGELOG 날짜를 git log 실제 커밋 날짜 기준으로 정정
-- SECURITY.md Response Timeline을 개인 프로젝트 현실에 맞게 완화
-- MAX_RECORDS 테스트에 잘림 이후 데이터 정합성 검증 추가
+- cfb 버전 핀 (`1.2.2`), `@types/node` 다운그레이드 (`^18`), SECURITY.md 현실화
 
 ## [1.0.1] - 2026-03-28
 
 ### Fixed
-- JSZip 검증에서 undocumented internal API(`_data.uncompressedSize`) 의존 제거, 엔트리 수 기반 검증으로 교체
-- MCP 에러 정제를 regex 기반에서 allowlist 기반으로 교체
+- JSZip undocumented internal API 의존 제거
+- MCP 에러 정제를 allowlist 기반으로 교체
 
 ### Added
-- 보안 로직 회귀 테스트 9개 추가 (MAX_RECORDS, span 방어, 제어문자 코드 10, 경로 순회, 에러 정제)
-- CHANGELOG.md
-- SECURITY.md (취약점 리포팅 절차)
+- 보안 로직 회귀 테스트 9개, CHANGELOG.md, SECURITY.md
 
 ## [1.0.0] - 2026-03-28
 
-### Changed
-- **Breaking**: 버전을 1.0.0으로 올림 (API 안정화 선언)
-
 ### Security
-- PDF: MAX_PAGES(5,000) + 누적 텍스트 크기 100MB 제한으로 OOM 방지
-- HWP5: 바이너리에서 읽은 rows/cols를 MAX_ROWS/MAX_COLS로 클램핑
-- HWP5: readRecords MAX_RECORDS(500K) 제한으로 메모리 폭주 방지
-- HWP5: findSections fallback 경로에도 MAX_SECTIONS(100) 적용
-- HWPX: manifest 경로 검색을 Regex에서 문자열 비교로 교체 (ReDoS 벡터 제거)
-- HWPX: 백슬래시 정규화 + Windows 드라이브 문자 경로 순회 차단
-- MCP: 에러 메시지에서 파일시스템 경로 정보 제거
-- detect: 4바이트 미만 버퍼 명시적 가드
-- tsup: CLI/MCP 빌드에 sourcemap 추가
+프로덕션급 보안 강화: ZIP bomb 방지, XXE/Billion Laughs 방지, 압축 폭탄 방지, PDF 리소스 제한, HWP5 레코드/섹션 제한, 테이블 차원 클램핑, 경로 순회 차단, MCP 에러 정제/경로 제한, 파일 크기 제한.
 
 ### Fixed
-- HWP5: 제어문자 코드 10(각주/미주)을 isExt 범위에 포함
+- HWP5 제어문자 코드 10(각주/미주) 정상 처리
 
-## [0.2.2] - 2026-03-28
-
-### Security
-- colSpan/rowSpan 클램핑, MCP safePath 강화, 파일 크기 제한
-
-## [0.2.1] - 2026-03-28
-
-### Security
-- ZIP bomb 방지, XXE/Billion Laughs 방지, HWP5 압축 폭탄 방지, 경로 순회 차단
+## [0.2.0] - 2026-03-27
 
 ### Changed
+- IR 패턴 도입, 2-pass 테이블 빌더, colSpan/rowSpan 클램핑
 - pdfjs-dist를 선택적 peerDependency로 변경
 
-## [0.2.0] - 2026-03-28
-
-### Changed
-- IR 패턴 도입, 2-pass 테이블 빌더, 파서-렌더러 분리
-
-## [0.1.0] - 2026-03-28
+## [0.1.0] - 2026-03-27
 
 ### Added
 - 최초 릴리스: HWP 5.x, HWPX, PDF 파싱, CLI, MCP 서버

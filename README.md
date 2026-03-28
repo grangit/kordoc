@@ -136,10 +136,10 @@ interface ParseResult {
 ### Types
 
 ```typescript
-import type { ParseResult, IRBlock, IRTable, IRCell, CellContext } from "kordoc"
+import type { ParseResult, ParseSuccess, ParseFailure, FileType } from "kordoc"
 ```
 
-> Internal utilities (`KordocError`, `sanitizeError`, `isPathTraversal`, `buildTable`, `blocksToMarkdown`, `convertTableToText`) are not part of the public API.
+> Internal types (`IRBlock`, `IRTable`, `IRCell`, `CellContext`) and utilities (`KordocError`, `sanitizeError`, `isPathTraversal`, `buildTable`, `blocksToMarkdown`) are not part of the public API.
 
 ## Requirements
 

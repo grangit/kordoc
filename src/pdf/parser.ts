@@ -208,8 +208,9 @@ function startsWithMarker(line: string): boolean {
  */
 function isStandaloneHeader(line: string): boolean {
   const t = line.trim()
-  // "제N조", "제N조(목적)", "제N장 총칙" 등 — 조항 번호 + 선택적 괄호/짧은 제목
-  return /^제\d+[조항호장절](\([^)]*\))?(\s+\S+){0,4}$/.test(t)
+  // "제N조", "제N조(목적)", "제1장 국민의 기본적 권리와 의무" 등
+  // 조항 번호 + 선택적 괄호 + 짧은 제목(최대 7단어 — 실제 법령 장 제목 커버)
+  return /^제\d+[조항호장절](\([^)]*\))?(\s+\S+){0,7}$/.test(t)
 }
 
 /**

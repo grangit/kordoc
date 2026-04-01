@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-04-01
+
+### Added
+- **README-KR.md API 섹션 추가** — ParseResult 인터페이스, 타입 export, internal 안내 추가.
+- 영문 README와 동기화 및 전반적인 가독성 개선.
+
+## [1.7.0] - 2026-03-31
+
+### Added
+- **HWPX 파서 테이블 복합 타입 단순화** — 내부 구조 개선 및 성능 최적화.
+- **public API 축소** — 보안 및 안정성을 위해 내부 함수들을 비공개로 전환.
+
 ## [1.1.2] - 2026-03-28
+
 
 ### Breaking Changes
 - **IR 타입 export 제거** — `IRBlock`, `IRTable`, `IRCell`, `CellContext`를 public API에서 제거. `buildTable` 등 IR 조작 함수가 이미 제거되었으므로 일관성 확보.

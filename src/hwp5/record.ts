@@ -13,12 +13,12 @@ export const TAG_CTRL_HEADER = 0x0047
 export const TAG_LIST_HEADER = 0x0048
 export const TAG_TABLE = 0x004d
 
-// DocInfo 태그 (스타일 정보 해석용)
-export const TAG_ID_MAPPINGS = 0x0032
-export const TAG_FACE_NAME = 0x0033
-export const TAG_DOC_CHAR_SHAPE = 0x0037
-export const TAG_DOC_PARA_SHAPE = 0x0039
-export const TAG_DOC_STYLE = 0x003a
+// DocInfo 태그 (스타일 정보 해석용) — HWPTAG_BEGIN(0x0010) 기준
+export const TAG_ID_MAPPINGS = 0x0011      // HWPTAG_BEGIN + 1
+export const TAG_FACE_NAME = 0x0013        // HWPTAG_BEGIN + 3
+export const TAG_DOC_CHAR_SHAPE = 0x0015   // HWPTAG_BEGIN + 5
+export const TAG_DOC_PARA_SHAPE = 0x0019   // HWPTAG_BEGIN + 9
+export const TAG_DOC_STYLE = 0x001a        // HWPTAG_BEGIN + 10
 
 // 특수 문자 코드 (UTF-16LE) — HWP 5.0 바이너리 스펙 + rhwp 검증
 // 3가지 카테고리: char(2바이트), inline(16바이트), extended(16바이트)
@@ -114,6 +114,12 @@ export function parseFileHeader(data: Buffer): HwpFileHeader {
 
 // ─── 스타일 정보 구조 ────────────────────────────────
 
+/** DocInfo에서 추출한 문단 모양 (PARA_SHAPE) */
+export interface HwpParaShape {
+  /** 개요 수준: 0=본문, 1-7=개요수준 1-7 (heading 계층) */
+  outlineLevel: number
+}
+
 /** DocInfo에서 추출한 글자 모양 (CHAR_SHAPE) */
 export interface HwpCharShape {
   /** 글꼴 크기 (단위: 0.1pt, 예: 100 = 10pt) */
@@ -142,15 +148,25 @@ export interface HwpStyle {
 /** DocInfo 파싱 결과 */
 export interface HwpDocInfo {
   charShapes: HwpCharShape[]
+  paraShapes: HwpParaShape[]
   styles: HwpStyle[]
 }
 
 /** DocInfo 레코드들에서 스타일 정보 추출 */
 export function parseDocInfo(records: HwpRecord[]): HwpDocInfo {
   const charShapes: HwpCharShape[] = []
+  const paraShapes: HwpParaShape[] = []
   const styles: HwpStyle[] = []
 
   for (const rec of records) {
+    // PARA_SHAPE — 문단 모양 (개요 수준 추출)
+    // 첫 4바이트(u32) 비트 팩: bits 25-27 = 개요 수준 (0=본문, 1-7=heading)
+    if (rec.tagId === TAG_DOC_PARA_SHAPE && rec.data.length >= 4) {
+      const flags = rec.data.readUInt32LE(0)
+      const outlineLevel = (flags >> 25) & 0x07 // bits 25-27 → 3bit (0-7)
+      paraShapes.push({ outlineLevel })
+    }
+
     if (rec.tagId === TAG_DOC_CHAR_SHAPE && rec.data.length >= 18) {
       // HWP5 CHAR_SHAPE 구조 (바이너리 스펙 1.1 기준):
       //   faceId: 7개 언어 * u16 = 14바이트 (offset 0-13)
@@ -206,7 +222,7 @@ export function parseDocInfo(records: HwpRecord[]): HwpDocInfo {
     }
   }
 
-  return { charShapes, styles }
+  return { charShapes, paraShapes, styles }
 }
 
 // ─── UTF-16LE 텍스트 추출 (21가지 제어문자 처리) ─────

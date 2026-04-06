@@ -164,6 +164,65 @@ function sanitizeText(text: string): string {
   return result
 }
 
+/**
+ * 레이아웃 테이블 감지 및 해체 — IRBlock 레벨에서 수행
+ * 적은 행(≤3) + 셀 내 줄바꿈 다량 → table 블록을 paragraph 블록들로 분해
+ * heading 감지 전에 호출해야 해체된 텍스트에 heading 감지 적용 가능
+ */
+export function flattenLayoutTables(blocks: IRBlock[]): IRBlock[] {
+  const result: IRBlock[] = []
+
+  for (const block of blocks) {
+    if (block.type !== "table" || !block.table) {
+      result.push(block)
+      continue
+    }
+
+    const { rows: numRows, cols: numCols, cells } = block.table
+
+    // 1x1 테이블은 기존 로직(tableToMarkdown)에서 처리
+    if (numRows === 1 && numCols === 1) {
+      result.push(block)
+      continue
+    }
+
+    // 레이아웃 테이블 휴리스틱
+    if (numRows <= 3) {
+      let totalNewlines = 0
+      let totalTextLen = 0
+      for (let r = 0; r < numRows; r++) {
+        for (let c = 0; c < numCols; c++) {
+          const t = cells[r]?.[c]?.text || ""
+          totalNewlines += (t.match(/\n/g) || []).length
+          totalTextLen += t.length
+        }
+      }
+
+      // 레이아웃 테이블 판정: 많은 줄바꿈(>5), 또는 적은 행에 비해 총 텍스트 과다(>300)
+      if (totalNewlines > 5 || (numRows <= 2 && totalTextLen > 300)) {
+        // 레이아웃 테이블 → 각 셀을 paragraph 블록으로 분해
+        for (let r = 0; r < numRows; r++) {
+          for (let c = 0; c < numCols; c++) {
+            const cellText = cells[r]?.[c]?.text?.trim()
+            if (!cellText) continue
+            // 셀 내 줄바꿈을 별도 paragraph로 분리
+            for (const line of cellText.split("\n")) {
+              const trimmed = line.trim()
+              if (!trimmed) continue
+              result.push({ type: "paragraph", text: trimmed, pageNumber: block.pageNumber })
+            }
+          }
+        }
+        continue
+      }
+    }
+
+    result.push(block)
+  }
+
+  return result
+}
+
 export function blocksToMarkdown(blocks: IRBlock[]): string {
   const lines: string[] = []
 

@@ -4,11 +4,11 @@ import {
   readRecords, decompressStream, parseFileHeader, extractText, parseDocInfo,
   TAG_PARA_HEADER, TAG_PARA_TEXT, TAG_CHAR_SHAPE, TAG_CTRL_HEADER, TAG_LIST_HEADER, TAG_TABLE,
   FLAG_COMPRESSED, FLAG_ENCRYPTED, FLAG_DISTRIBUTION, FLAG_DRM,
-  type HwpRecord, type HwpDocInfo, type HwpCharShape,
+  type HwpRecord, type HwpDocInfo, type HwpCharShape, type HwpParaShape,
 } from "./record.js"
 import { decryptViewText } from "./crypto.js"
 import { parseLenientCfb, type LenientCfbContainer } from "./cfb-lenient.js"
-import { buildTable, blocksToMarkdown, MAX_COLS, MAX_ROWS } from "../table/builder.js"
+import { buildTable, blocksToMarkdown, flattenLayoutTables, MAX_COLS, MAX_ROWS } from "../table/builder.js"
 import type { CellContext, IRBlock, IRTable, DocumentMetadata, InternalParseResult, ParseOptions, ParseWarning, OutlineItem, InlineStyle, ExtractedImage } from "../types.js"
 import { HEADING_RATIO_H1, HEADING_RATIO_H2, HEADING_RATIO_H3 } from "../types.js"
 import { KordocError, sanitizeHref } from "../utils.js"
@@ -113,18 +113,21 @@ export function parseHwp5Document(buffer: Buffer, options?: ParseOptions): Inter
     ? extractHwp5Images(cfb, blocks, compressed, warnings)
     : extractHwp5ImagesLenient(lenientCfb!, blocks, compressed, warnings)
 
+  // 레이아웃 테이블 해체 (heading 감지 전에 수행하여 해체된 텍스트도 heading 감지 대상)
+  const flatBlocks = flattenLayoutTables(blocks)
+
   // 스타일 기반 헤딩 감지
   if (docInfo) {
-    detectHwp5Headings(blocks, docInfo)
+    detectHwp5Headings(flatBlocks, docInfo)
   }
 
   // outline 구축
-  const outline: OutlineItem[] = blocks
+  const outline: OutlineItem[] = flatBlocks
     .filter(b => b.type === "heading" && b.level && b.text)
     .map(b => ({ level: b.level!, text: b.text!, pageNumber: b.pageNumber }))
 
-  const markdown = blocksToMarkdown(blocks)
-  return { markdown, blocks, metadata, outline: outline.length > 0 ? outline : undefined, warnings: warnings.length > 0 ? warnings : undefined, images: images.length > 0 ? images : undefined }
+  const markdown = blocksToMarkdown(flatBlocks)
+  return { markdown, blocks: flatBlocks, metadata, outline: outline.length > 0 ? outline : undefined, warnings: warnings.length > 0 ? warnings : undefined, images: images.length > 0 ? images : undefined }
 }
 
 /** DocInfo 스트림 파싱 (best-effort) */
@@ -183,19 +186,27 @@ function detectHwp5Headings(blocks: IRBlock[], docInfo: HwpDocInfo): void {
   if (baseFontSize <= 0) return
 
   for (const block of blocks) {
-    if (block.type !== "paragraph" || !block.text || !block.style?.fontSize) continue
+    // 개요 수준(outlineLevel)으로 이미 heading이 된 블록은 스킵
+    if (block.type === "heading") continue
+    if (block.type !== "paragraph" || !block.text) continue
     const text = block.text.trim()
     if (text.length === 0 || text.length > 200) continue
     if (/^\d+$/.test(text)) continue
 
-    const ratio = block.style.fontSize / baseFontSize
     let level = 0
-    if (ratio >= HEADING_RATIO_H1) level = 1
-    else if (ratio >= HEADING_RATIO_H2) level = 2
-    else if (ratio >= HEADING_RATIO_H3) level = 3
 
-    // "제N조", "제N장" 패턴은 heading으로 강제 지정
-    if (/^제\d+[조장절편]/.test(text) && text.length <= 50) {
+    // 폰트 크기 비율 기반 헤딩 감지 (스타일 정보가 있을 때만)
+    if (block.style?.fontSize && baseFontSize > 0) {
+      const ratio = block.style.fontSize / baseFontSize
+      if (ratio >= HEADING_RATIO_H1) level = 1
+      else if (ratio >= HEADING_RATIO_H2) level = 2
+      else if (ratio >= HEADING_RATIO_H3) level = 3
+    }
+
+    // "제N장/절/편" 패턴 → H2, "제N조" 패턴 → H3 (스타일 유무 무관)
+    if (/^제\d+[장절편]\s/.test(text) && text.length <= 50) {
+      if (level === 0) level = 2
+    } else if (/^제\d+(조의?\d*)\s*[\(（]/.test(text) && text.length <= 80) {
       if (level === 0) level = 3
     }
 
@@ -520,13 +531,21 @@ function parseSection(records: HwpRecord[], docInfo: HwpDocInfo | null, warnings
     const rec = records[i]
 
     if (rec.tagId === TAG_PARA_HEADER && rec.level === 0) {
-      const { paragraph, tables, nextIdx, charShapeIds } = parseParagraphWithTables(records, i)
+      const { paragraph, tables, nextIdx, charShapeIds, paraShapeId } = parseParagraphWithTables(records, i)
       if (paragraph) {
         const block: IRBlock = { type: "paragraph", text: paragraph, pageNumber: sectionNum }
         // CHAR_SHAPE 기반 스타일 정보 추가
         if (docInfo && charShapeIds.length > 0) {
           const style = resolveCharStyle(charShapeIds, docInfo)
           if (style) block.style = style
+        }
+        // PARA_SHAPE 개요 수준으로 heading 즉시 설정
+        if (docInfo && paraShapeId >= 0 && paraShapeId < docInfo.paraShapes.length) {
+          const ol = docInfo.paraShapes[paraShapeId].outlineLevel
+          if (ol >= 1 && ol <= 6) {
+            block.type = "heading"
+            block.level = ol
+          }
         }
         blocks.push(block)
       }
@@ -682,6 +701,11 @@ function parseParagraphWithTables(records: HwpRecord[], startIdx: number) {
   let text = ""
   const tables: ReturnType<typeof buildTable>[] = []
   const charShapeIds: number[] = []
+
+  // PARA_HEADER에서 paraShapeId 추출 (offset 8-9, u16)
+  const paraHeaderData = records[startIdx].data
+  const paraShapeId = paraHeaderData.length >= 10 ? paraHeaderData.readUInt16LE(8) : -1
+
   let i = startIdx + 1
 
   while (i < records.length) {
@@ -713,7 +737,7 @@ function parseParagraphWithTables(records: HwpRecord[], startIdx: number) {
   }
 
   const trimmed = text.trim()
-  return { paragraph: trimmed || null, tables, nextIdx: i, charShapeIds }
+  return { paragraph: trimmed || null, tables, nextIdx: i, charShapeIds, paraShapeId }
 }
 
 function parseTableBlock(records: HwpRecord[], startIdx: number) {

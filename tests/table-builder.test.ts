@@ -92,7 +92,7 @@ describe("blocksToMarkdown", () => {
     assert.ok(md.includes("*(제10조제2항 관련)*"))
   })
 
-  it("colSpan 병합 셀은 내용을 복제하여 정보 보존", () => {
+  it("colSpan 병합 셀은 첫 열에만 텍스트, 나머지 빈칸", () => {
     const blocks: IRBlock[] = [
       {
         type: "table",
@@ -103,7 +103,7 @@ describe("blocksToMarkdown", () => {
       },
     ]
     const md = blocksToMarkdown(blocks)
-    assert.ok(md.includes("| 병합셀 | 병합셀 |"), "colSpan 병합 셀 내용이 복제되어야 함")
+    assert.ok(md.includes("| 병합셀 |"), "colSpan 병합 셀 텍스트가 첫 열에 존재")
     assert.ok(md.includes("| 값1 | 값2 |"))
   })
 

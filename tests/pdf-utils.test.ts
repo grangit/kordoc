@@ -120,11 +120,11 @@ describe("cleanPdfText", () => {
 
   // ─── 독립 헤더 경계 케이스 ─────────────────────────────
 
-  it("제N조 + 긴 본문은 헤더가 아니므로 병합됨", () => {
-    // "제1조 이 법은 국민의 기본적 권리와 의무를 보장하기 위하여 제정한다" — 본문이 이어지는 긴 줄
+  it("제N조 + 긴 본문도 마커 줄이므로 병합 안 됨", () => {
+    // "제1조"로 시작하는 줄은 startsWithMarker가 true → 병합하지 않음 (조항 보호)
     const input = "제1조 이 법은 국민의 기본적 권리와 의무를 보장하기 위하여 제정한다\n다만 예외가 있다"
     const result = cleanPdfText(input)
-    assert.ok(result.includes("제정한다 다만"), `긴 줄은 헤더 아님 → 병합: ${result}`)
+    assert.ok(result.includes("제정한다\n다만"), `제N조 마커 줄은 병합 안 됨: ${result}`)
   })
 
   it("제N조(괄호제목) 짧은 헤더는 병합 안 됨", () => {

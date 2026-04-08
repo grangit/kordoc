@@ -10,7 +10,7 @@ import { DOMParser } from "@xmldom/xmldom"
 import { buildTable, convertTableToText, blocksToMarkdown, MAX_COLS, MAX_ROWS } from "../table/builder.js"
 import type { CellContext, IRBlock, DocumentMetadata, InternalParseResult, ParseOptions, ParseWarning, OutlineItem, InlineStyle, ExtractedImage } from "../types.js"
 import { HEADING_RATIO_H1, HEADING_RATIO_H2, HEADING_RATIO_H3 } from "../types.js"
-import { KordocError, isPathTraversal, sanitizeHref, precheckZipSize } from "../utils.js"
+import { KordocError, isPathTraversal, sanitizeHref, precheckZipSize, stripDtd } from "../utils.js"
 // 테스트 호환성 re-export
 export { precheckZipSize } from "../utils.js"
 import { parsePageRange } from "../page-range.js"
@@ -146,10 +146,7 @@ function parseStyleElements(doc: Document, map: Map<string, { name: string; char
   }
 }
 
-/** XXE/Billion Laughs 방지 — DOCTYPE 제거 (내부 DTD 서브셋 포함) */
-function stripDtd(xml: string): string {
-  return xml.replace(/<!DOCTYPE\s[^[>]*(\[[\s\S]*?\])?\s*>/gi, "")
-}
+// stripDtd는 utils.js에서 import
 
 export async function parseHwpxDocument(buffer: ArrayBuffer, options?: ParseOptions): Promise<InternalParseResult> {
   // Best-effort 사전 검증 — CD 선언 크기 기반 (위조 가능, 실제 방어는 per-file 누적 체크)
@@ -618,7 +615,7 @@ function walkSection(
           if (tableStack.length > 0) {
             const parentTable = tableStack.pop()!
             // 중첩 표가 충분히 크면 (3행+, 2열+) 별도 블록으로 분리
-            const nestedCols = Math.max(...newTable.rows.map(r => r.length))
+            let nestedCols = 0; for (const r of newTable.rows) if (r.length > nestedCols) nestedCols = r.length
             if (newTable.rows.length >= 3 && nestedCols >= 2) {
               blocks.push({ type: "table", table: buildTable(newTable.rows), pageNumber: sectionNum })
             } else {
@@ -743,7 +740,7 @@ function walkParagraphChildren(
         if (newTable.rows.length > 0) {
           if (tableStack.length > 0) {
             const parentTable = tableStack.pop()!
-            const nestedCols = Math.max(...newTable.rows.map(r => r.length))
+            let nestedCols = 0; for (const r of newTable.rows) if (r.length > nestedCols) nestedCols = r.length
             if (newTable.rows.length >= 3 && nestedCols >= 2) {
               blocks.push({ type: "table", table: buildTable(newTable.rows), pageNumber: sectionNum })
             } else {

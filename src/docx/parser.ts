@@ -11,7 +11,7 @@ import type {
   IRBlock, IRTable, IRCell, DocumentMetadata, InternalParseResult,
   ParseOptions, ParseWarning, ExtractedImage, InlineStyle,
 } from "../types.js"
-import { KordocError, precheckZipSize } from "../utils.js"
+import { KordocError, precheckZipSize, stripDtd } from "../utils.js"
 import { blocksToMarkdown } from "../table/builder.js"
 
 /** ZIP 압축 해제 누적 최대 크기 (100MB) — ZIP bomb 방지 */
@@ -66,7 +66,7 @@ function getAttr(el: Element, localName: string): string | null {
 }
 
 function parseXml(text: string): Document {
-  return new DOMParser().parseFromString(text, "text/xml")
+  return new DOMParser().parseFromString(stripDtd(text), "text/xml")
 }
 
 // ─── 스타일 파싱 ────────────────────────────────────────

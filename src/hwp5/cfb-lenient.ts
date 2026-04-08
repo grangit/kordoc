@@ -57,6 +57,7 @@ export function parseLenientCfb(data: Buffer): LenientCfbContainer {
   const miniSectorSize = 1 << miniSectorSizeShift  // 보통 64
 
   const fatSectorCount = data.readUInt32LE(44)
+  if (fatSectorCount > 10000) throw new Error("FAT 섹터 수가 너무 많습니다: " + fatSectorCount)
   const firstDirSector = data.readUInt32LE(48)
   const miniStreamCutoff = data.readUInt32LE(56)  // 보통 4096
   const firstMiniFatSector = data.readUInt32LE(60)

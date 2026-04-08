@@ -461,11 +461,14 @@ export function buildTableGrids(
     if (hLines.length < 2 || vLines.length < 2) continue
 
     // 3. 이 그룹의 Vertex만 수집
+    let gx1 = Infinity, gy1 = Infinity, gx2 = -Infinity, gy2 = -Infinity
+    for (const l of vLines) { if (l.x1 < gx1) gx1 = l.x1; if (l.x1 > gx2) gx2 = l.x1 }
+    for (const l of hLines) { if (l.y1 < gy1) gy1 = l.y1; if (l.y1 > gy2) gy2 = l.y1 }
     const groupBbox = {
-      x1: Math.min(...vLines.map(l => l.x1)) - CONNECT_TOL,
-      y1: Math.min(...hLines.map(l => l.y1)) - CONNECT_TOL,
-      x2: Math.max(...vLines.map(l => l.x1)) + CONNECT_TOL,
-      y2: Math.max(...hLines.map(l => l.y1)) + CONNECT_TOL,
+      x1: gx1 - CONNECT_TOL,
+      y1: gy1 - CONNECT_TOL,
+      x2: gx2 + CONNECT_TOL,
+      y2: gy2 + CONNECT_TOL,
     }
 
     const groupVertices = vertices.filter(v =>
@@ -945,8 +948,8 @@ function markEvenRun(items: TextItem[], result: boolean[], start: number, end: n
   const posGaps = gaps.filter(g => g > 0)
   if (posGaps.length < 2) return
 
-  const minGap = Math.min(...posGaps)
-  const maxGap = Math.max(...posGaps)
+  let minGap = Infinity, maxGap = -Infinity
+  for (const g of posGaps) { if (g < minGap) minGap = g; if (g > maxGap) maxGap = g }
   const avgFs = items[start].fontSize
 
   // 간격이 fontSize의 0.1~3배 사이이고, 최대/최소 비율 3배 이내

@@ -43,7 +43,8 @@ export function sanitizeError(err: unknown): string {
 export function isPathTraversal(name: string): boolean {
   if (name.includes("\x00")) return true
   const normalized = name.replace(/\\/g, "/")
-  return normalized.includes("..") || normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)
+  const segments = normalized.split("/")
+  return segments.some(s => s === "..") || normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)
 }
 
 // ─── ZIP 안전 로딩 (ZIP bomb 방지) ────────────────────
@@ -98,12 +99,33 @@ export function precheckZipSize(
   }
 }
 
+/** XXE/Billion Laughs 방지 — DOCTYPE 제거 (내부 DTD 서브셋 포함) */
+export function stripDtd(xml: string): string {
+  return xml.replace(/<!DOCTYPE\s[^[>]*(\[[\s\S]*?\])?\s*>/gi, "")
+}
+
 /** 하이퍼링크 URL 살균 — javascript: 등 XSS 위험 스킴 차단 */
 const SAFE_HREF_RE = /^(?:https?:|mailto:|tel:|#)/i
 export function sanitizeHref(href: string): string | null {
   const trimmed = href.trim()
   if (!trimmed || !SAFE_HREF_RE.test(trimmed)) return null
   return trimmed
+}
+
+// ─── 안전한 min/max (스택 오버플로 방지) ─────────────
+
+/** Math.min(...arr) 대체 — 대형 배열에서 스택 오버플로 방지 */
+export function safeMin(arr: number[]): number {
+  let min = Infinity
+  for (let i = 0; i < arr.length; i++) if (arr[i] < min) min = arr[i]
+  return min
+}
+
+/** Math.max(...arr) 대체 — 대형 배열에서 스택 오버플로 방지 */
+export function safeMax(arr: number[]): number {
+  let max = -Infinity
+  for (let i = 0; i < arr.length; i++) if (arr[i] > max) max = arr[i]
+  return max
 }
 
 // ─── 에러 분류 ──────────────────────────────────────

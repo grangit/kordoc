@@ -28,7 +28,14 @@ const MAX_LEVENSHTEIN_LEN = 10_000
 
 /** Levenshtein 편집 거리 — O(min(m,n)) 공간 최적화 */
 function levenshtein(a: string, b: string): number {
-  if (a.length + b.length > MAX_LEVENSHTEIN_LEN) return Math.abs(a.length - b.length)
+  if (a.length + b.length > MAX_LEVENSHTEIN_LEN) {
+    // 길이 차이 + 앞 500자 샘플 비교로 근사 거리 추정
+    const sampleLen = Math.min(500, a.length, b.length)
+    let diffs = 0
+    for (let i = 0; i < sampleLen; i++) if (a[i] !== b[i]) diffs++
+    const sampleRate = sampleLen > 0 ? diffs / sampleLen : 1
+    return Math.abs(a.length - b.length) + Math.round(Math.min(a.length, b.length) * sampleRate)
+  }
   if (a.length > b.length) [a, b] = [b, a]
   const m = a.length
   const n = b.length

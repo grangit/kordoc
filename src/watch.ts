@@ -1,7 +1,7 @@
 /** 디렉토리 감시 모드 — 새 문서 자동 변환 + Webhook 알림 */
 
-import { watch, readFileSync, writeFileSync, mkdirSync, statSync, existsSync } from "fs"
-import { basename, resolve, extname } from "path"
+import { watch, readFileSync, writeFileSync, mkdirSync, statSync, existsSync, realpathSync } from "fs"
+import { basename, resolve, extname, sep } from "path"
 import { parse, detectFormat } from "./index.js"
 import { toArrayBuffer } from "./utils.js"
 import type { WatchOptions } from "./types.js"
@@ -34,6 +34,10 @@ export async function watchDirectory(options: WatchOptions): Promise<void> {
 
   // 디바운스 맵
   const pending = new Map<string, ReturnType<typeof setTimeout>>()
+  // 동시 처리 제한 — 메모리 폭주 방지
+  const MAX_CONCURRENT = 3
+  let activeCount = 0
+  const inProgress = new Set<string>()
 
   /** 파일 크기가 안정화될 때까지 대기 (쓰기 완료 감지) */
   const waitForStableSize = async (absPath: string): Promise<number> => {
@@ -53,14 +57,20 @@ export async function watchDirectory(options: WatchOptions): Promise<void> {
   const processFile = async (filePath: string) => {
     const ext = extname(filePath).toLowerCase()
     if (!SUPPORTED_EXTENSIONS.has(ext)) return
+    // 동일 파일 동시 처리 방지 + 동시 처리 수 제한
+    if (inProgress.has(filePath) || activeCount >= MAX_CONCURRENT) return
+    inProgress.add(filePath)
+    activeCount++
 
     const fileName = basename(filePath)
     try {
-      const absPath = resolve(dir, filePath)
-      // 경로 순회 방지 — 감시 디렉토리 외부 파일 차단
-      const realDir = resolve(dir)
-      if (!absPath.startsWith(realDir)) return
-      if (!existsSync(absPath)) return
+      const rawPath = resolve(dir, filePath)
+      if (!existsSync(rawPath)) return
+      // 심볼릭 링크 해석 후 감시 디렉토리 외부 파일 차단
+      let absPath: string
+      try { absPath = realpathSync(rawPath) } catch { return }
+      const realDir = realpathSync(resolve(dir))
+      if (!absPath.startsWith(realDir + sep) && absPath !== realDir) return
 
       const fileSize = await waitForStableSize(absPath)
       if (fileSize > MAX_FILE_SIZE || fileSize === 0) return
@@ -97,6 +107,9 @@ export async function watchDirectory(options: WatchOptions): Promise<void> {
       })
     } catch (err) {
       log(`[kordoc watch] 에러: ${fileName} — ${err instanceof Error ? err.message : err}`)
+    } finally {
+      inProgress.delete(filePath)
+      activeCount--
     }
   }
 
@@ -151,9 +164,10 @@ function validateWebhookUrl(url: string): void {
     // 클라우드 메타데이터 엔드포인트
     hostname === "metadata.google.internal" ||
     hostname === "metadata.google" ||
-    // 16진수/8진수 IP 인코딩 우회 방지
+    // 16진수/8진수/10진수 정수 IP 인코딩 우회 방지
     /^0x[0-9a-f]+$/i.test(hostname) ||
-    /^0[0-7]+$/.test(hostname)
+    /^0[0-7]+$/.test(hostname) ||
+    /^\d+$/.test(hostname)
   ) {
     throw new Error(`내부 네트워크 대상 webhook은 허용되지 않습니다: ${hostname}`)
   }
@@ -167,6 +181,7 @@ async function sendWebhook(url: string | undefined, payload: Record<string, unkn
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...payload, timestamp: new Date().toISOString() }),
+      redirect: "error",
     })
   } catch (err) {
     process.stderr.write(`[kordoc watch] webhook 전송 실패: ${err instanceof Error ? err.message : String(err)}\n`)

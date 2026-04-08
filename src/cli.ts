@@ -5,7 +5,7 @@ import { basename, resolve } from "path"
 import { Command } from "commander"
 import { parse, detectFormat } from "./index.js"
 import type { ParseOptions } from "./types.js"
-import { VERSION, toArrayBuffer } from "./utils.js"
+import { VERSION, toArrayBuffer, sanitizeError } from "./utils.js"
 
 const program = new Command()
 
@@ -72,7 +72,9 @@ program
           markdown = markdown.replace(/!\[image\]\(image_/g, "![image](images/image_")
         }
         const output = opts.format === "json"
-          ? JSON.stringify(result, null, 2)
+          ? JSON.stringify(result, (_key, value) =>
+              value instanceof Uint8Array ? Buffer.from(value).toString("base64") : value
+            , 2)
           : markdown
 
         // 이미지 저장 (--out-dir 또는 --output 시)
@@ -101,7 +103,6 @@ program
           process.stdout.write(output + "\n")
         }
       } catch (err) {
-        const { sanitizeError } = await import("./utils.js")
         process.stderr.write(`\n[kordoc] ERROR: ${fileName} — ${sanitizeError(err)}\n`)
         process.exitCode = 1
       }

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-04-08
+
+### Security
+- **XLSX/DOCX Billion Laughs 방지** — `stripDtd()`를 utils.ts로 추출, XLSX/DOCX `parseXml()`에 적용. 기존 HWPX만 보호하던 DOCTYPE 제거를 전 포맷으로 확대.
+- **`isPathTraversal()` 오탐 수정** — `includes("..")` 부분 문자열 매칭 → 경로 컴포넌트 단위(`segments.some(s => s === "..")`) 검사로 변경. `file..v2.xml` 같은 합법적 파일명 차단 해소.
+- **Watch SSRF 강화** — fetch에 `redirect: "error"` 추가(리다이렉트 기반 SSRF 차단), 10진수 정수 IP(`http://2130706433`) 차단 추가.
+- **Watch symlink 경로 순회 차단** — `resolve()` → `realpathSync()`로 교체. 심볼릭 링크가 감시 디렉토리 외부를 가리키는 경우 차단.
+- **HWP5 lenient decompression bomb 방지** — `findSectionsLenient`/`findViewTextSectionsLenient`에서 누적 압축해제 크기 추적. 100개 섹션 × 100MB = 10GB 공격 차단.
+- **CFB lenient FAT 섹터 상한** — `fatSectorCount > 10,000` 시 거부. 악성 파일의 거대 FAT 테이블 할당 방지.
+- **`buildTableDirect` MAX_COLS 적용** — colAddr 기반 직접 배치에서 `MAX_COLS(200)` 상한 누락 수정. 악성 HWP의 메모리 폭주 방지.
+
+### Fixed
+- **`Math.min/max(...spread)` 스택 오버플로** — PDF/HWPX 15개소의 `Math.min(...array)` 패턴을 for 루프 기반 `safeMin`/`safeMax` 유틸로 교체. 20,000+ 텍스트 아이템 페이지에서 `RangeError` 방지.
+- **Levenshtein fallback 유사도 오류** — 길이 합 10,000자 초과 시 `Math.abs(a.length - b.length)` 반환하던 것을 앞 500자 샘플 기반 근사 거리 추정으로 개선. 동일 길이 다른 문자열에서 거리=0(유사도 1.0) 반환하던 버그 수정.
+- **MCP `parse_metadata` XLSX/DOCX 오분류** — `detectFormat`이 모든 ZIP을 "hwpx"로 반환하여 XLSX/DOCX가 HWPX 메타데이터 추출 경로를 타던 버그. `detectZipFormat`으로 세분화 후 전체 파싱 fallback.
+- **CLI JSON Uint8Array 직렬화** — `--format json` 출력에서 `Uint8Array`가 `{"0":255,"1":128,...}` 형태로 나오던 것을 base64 문자열로 변환.
+- **CLI `sanitizeError` 동적 import 제거** — catch 블록의 불필요한 `await import("./utils.js")`를 정적 import으로 변경.
+
+### Changed
+- **Watch 동시 처리 제한** — `MAX_CONCURRENT=3` + `inProgress` Set으로 동일 파일 동시 처리 방지 및 전체 동시 처리 수 제한. 대량 파일 유입 시 OOM 방지.
+- **PDF `allFontSizes` 메모리 최적화** — 5000페이지 PDF에서 500만 엔트리 배열(~40MB) → 빈도 Map(~50 엔트리)으로 교체. `computeMedianFontSizeFromFreq()` 도입.
+- **`stripDtd()` 공용화** — HWPX 로컬 함수에서 utils.ts export로 이동. HWPX/XLSX/DOCX 전 파서 공유.
+
 ## [2.0.3] - 2026-04-06
 
 ### Added

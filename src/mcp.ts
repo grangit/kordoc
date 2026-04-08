@@ -187,7 +187,14 @@ server.tool(
       const { buffer } = readValidatedFile(file_path, MAX_METADATA_FILE_SIZE)
 
       let metadata
-      switch (format) {
+      // ZIP 기반 포맷(hwpx)은 내부 구조로 세분화 (XLSX/DOCX 구분)
+      let effectiveFormat = format
+      if (format === "hwpx") {
+        const { detectZipFormat } = await import("./detect.js")
+        const zipFormat = await detectZipFormat(buffer)
+        if (zipFormat === "xlsx" || zipFormat === "docx") effectiveFormat = zipFormat as any
+      }
+      switch (effectiveFormat) {
         case "hwp":
           metadata = extractHwp5MetadataOnly(Buffer.from(buffer))
           break
@@ -197,6 +204,13 @@ server.tool(
         case "pdf":
           metadata = await extractPdfMetadataOnly(buffer)
           break
+        case "xlsx":
+        case "docx": {
+          // XLSX/DOCX는 전용 metadata 추출기가 없으므로 전체 파싱 후 metadata 반환
+          const result = await parse(buffer)
+          metadata = result.success ? result.metadata : undefined
+          break
+        }
       }
 
       return {

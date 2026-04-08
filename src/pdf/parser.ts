@@ -7,7 +7,7 @@
 
 import type { ParseResult, InternalParseResult, IRBlock, IRTable, DocumentMetadata, ParseOptions, BoundingBox, ParseWarning, OutlineItem } from "../types.js"
 import { HEADING_RATIO_H1, HEADING_RATIO_H2, HEADING_RATIO_H3 } from "../types.js"
-import { KordocError } from "../utils.js"
+import { KordocError, safeMin, safeMax } from "../utils.js"
 import { parsePageRange } from "../page-range.js"
 import { blocksToMarkdown } from "../table/builder.js"
 import { extractLines, preprocessLines, filterPageBorderLines, buildTableGrids, extractCells, mapTextToCells, cellTextToString, detectEvenSpacedItems, type TextItem, type TableGrid, type ExtractedCell } from "./line-detector.js"
@@ -90,8 +90,8 @@ export async function parsePdfDocument(buffer: ArrayBuffer, options?: ParseOptio
     const pageFilter = options?.pages ? parsePageRange(options.pages, effectivePageCount) : null
     const totalTarget = pageFilter ? pageFilter.size : effectivePageCount
 
-    // 전체 문서의 폰트 크기 통계 수집 (헤딩 감지용)
-    const allFontSizes: number[] = []
+    // 전체 문서의 폰트 크기 빈도 수집 (헤딩 감지용) — 빈도 Map으로 메모리 절약
+    const fontSizeFreq = new Map<number, number>()
     const pageHeights = new Map<number, number>()
 
     let parsedPages = 0
@@ -111,9 +111,9 @@ export async function parsePdfDocument(buffer: ArrayBuffer, options?: ParseOptio
           warnings.push({ page: i, message: `${hiddenCount}개 숨겨진 텍스트 요소 필터링됨`, code: "HIDDEN_TEXT_FILTERED" })
         }
 
-        // 폰트 크기 통계 수집
+        // 폰트 크기 빈도 수집
         for (const item of visible) {
-          if (item.fontSize > 0) allFontSizes.push(item.fontSize)
+          if (item.fontSize > 0) fontSizeFreq.set(item.fontSize, (fontSizeFreq.get(item.fontSize) || 0) + 1)
         }
 
         // 선 기반 테이블 감지를 위한 operatorList
@@ -165,7 +165,7 @@ export async function parsePdfDocument(buffer: ArrayBuffer, options?: ParseOptio
     }
 
     // 헤딩 감지: 폰트 크기 기반
-    const medianFontSize = computeMedianFontSize(allFontSizes)
+    const medianFontSize = computeMedianFontSizeFromFreq(fontSizeFreq)
     if (medianFontSize > 0) {
       detectHeadings(blocks, medianFontSize)
     }
@@ -256,11 +256,18 @@ function filterHiddenText(items: NormItem[], pageWidth: number, pageHeight: numb
 // 헤딩 감지 (폰트 크기 기반)
 // ═══════════════════════════════════════════════════════
 
-function computeMedianFontSize(sizes: number[]): number {
-  if (sizes.length === 0) return 0
-  const sorted = [...sizes].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+function computeMedianFontSizeFromFreq(freq: Map<number, number>): number {
+  if (freq.size === 0) return 0
+  let total = 0
+  for (const count of freq.values()) total += count
+  const sorted = [...freq.entries()].sort((a, b) => a[0] - b[0])
+  const mid = Math.floor(total / 2)
+  let cumulative = 0
+  for (const [size, count] of sorted) {
+    cumulative += count
+    if (cumulative > mid) return size
+  }
+  return sorted[sorted.length - 1][0]
 }
 
 /**
@@ -655,7 +662,7 @@ function extractBlocksWithGrids(
     // XY-Cut으로 왼쪽 본문과 오른쪽 부서명 등을 분리 후 개별 처리
     if (remaining.length > 0) {
       const allY = remaining.map(i => i.y)
-      const pageH = Math.max(...allY) - Math.min(...allY)
+      const pageH = safeMax(allY) - safeMin(allY)
       const groups = xyCutOrder(remaining, Math.max(15, pageH * 0.03))
       const textBlocks: IRBlock[] = []
       for (const group of groups) {
@@ -759,7 +766,7 @@ function extractPageBlocksFallback(items: NormItem[], pageNum: number): IRBlock[
     } else {
       // 3단계: XY-Cut으로 읽기 순서 결정
       const allY = items.map(i => i.y)
-      const pageHeight = Math.max(...allY) - Math.min(...allY)
+      const pageHeight = safeMax(allY) - safeMin(allY)
       const gapThreshold = Math.max(15, pageHeight * 0.03)
 
       const orderedGroups = xyCutOrder(items, gapThreshold)
@@ -961,7 +968,7 @@ function isProseSpread(items: NormItem[]): boolean {
     gaps.push(sorted[i].x - (sorted[i - 1].x + sorted[i - 1].w))
   }
   // gap의 최대값이 작고 평균 단어 길이가 짧으면 prose
-  const maxGap = Math.max(...gaps)
+  const maxGap = safeMax(gaps)
   const avgLen = items.reduce((s, i) => s + i.text.length, 0) / items.length
   // 짧은 단어들이 좁은 간격으로 나열 = prose (예: "위 표 제3호나목에서 남은 유효기간...")
   return maxGap < 40 && avgLen < 5
@@ -970,7 +977,7 @@ function isProseSpread(items: NormItem[]): boolean {
 function detectColumns(yLines: NormItem[][]): number[] | null {
   const allItems = yLines.flat()
   if (allItems.length === 0) return null
-  const pageWidth = Math.max(...allItems.map(i => i.x + i.w)) - Math.min(...allItems.map(i => i.x))
+  const pageWidth = safeMax(allItems.map(i => i.x + i.w)) - safeMin(allItems.map(i => i.x))
   if (pageWidth < 100) return null
 
   // "비고" 이전 아이템만 사용 (비고 이후는 prose)

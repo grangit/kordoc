@@ -75,7 +75,7 @@ export function buildTable(rows: CellContext[][]): IRTable {
 
 /** colAddr/rowAddr 절대 좌표 기반 직접 배치 */
 function buildTableDirect(rows: CellContext[][], numRows: number): IRTable {
-  // 전체 셀에서 maxCols 계산
+  // 전체 셀에서 maxCols 계산 (MAX_COLS 상한 적용)
   let maxCols = 0
   for (const row of rows) {
     for (const cell of row) {
@@ -83,6 +83,7 @@ function buildTableDirect(rows: CellContext[][], numRows: number): IRTable {
       if (end > maxCols) maxCols = end
     }
   }
+  if (maxCols > MAX_COLS) maxCols = MAX_COLS
   if (maxCols === 0) return { rows: 0, cols: 0, cells: [], hasHeader: false }
 
   const grid: IRCell[][] = Array.from({ length: numRows }, () =>
@@ -93,7 +94,7 @@ function buildTableDirect(rows: CellContext[][], numRows: number): IRTable {
     for (const cell of row) {
       const r = cell.rowAddr ?? 0
       const c = cell.colAddr ?? 0
-      if (r >= numRows || c >= maxCols) continue
+      if (r >= numRows || c >= maxCols || r < 0 || c < 0) continue
 
       grid[r][c] = { text: cell.text.trim(), colSpan: cell.colSpan, rowSpan: cell.rowSpan }
 

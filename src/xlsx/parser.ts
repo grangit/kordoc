@@ -11,7 +11,7 @@ import type {
   IRBlock, IRTable, IRCell, CellContext, DocumentMetadata, InternalParseResult,
   ParseOptions, ParseWarning, ExtractedImage,
 } from "../types.js"
-import { KordocError, precheckZipSize } from "../utils.js"
+import { KordocError, precheckZipSize, stripDtd } from "../utils.js"
 import { buildTable, blocksToMarkdown } from "../table/builder.js"
 
 // ─── 상수 ────────────────────────────────────────────
@@ -69,7 +69,7 @@ function getTextContent(el: Element): string {
 }
 
 function parseXml(text: string): Document {
-  return new DOMParser().parseFromString(text, "text/xml")
+  return new DOMParser().parseFromString(stripDtd(text), "text/xml")
 }
 
 // ─── 공유 문자열 파싱 ──────────────────────────────────

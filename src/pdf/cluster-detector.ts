@@ -152,7 +152,8 @@ function mergeEvenSpacedClusters(
           for (let g = i + 1; g < runEnd; g++) {
             gaps.push(sorted[g].x - (sorted[g - 1].x + sorted[g - 1].w))
           }
-          const minG = Math.min(...gaps), maxG = Math.max(...gaps)
+          let minG = Infinity, maxG = -Infinity
+          for (const g of gaps) { if (g < minG) minG = g; if (g > maxG) maxG = g }
           if (minG > 0 && maxG / minG <= 3) {
             const run = sorted.slice(i, runEnd)
             const text = run.map(r => r.text).join("")
@@ -196,8 +197,8 @@ function expandUsedItems(usedItems: Set<ClusterItem>, originMap: Map<ClusterItem
 function detectHeaderRow(rows: RowGroup[]): HeaderResult | null {
   const allItems = rows.flatMap(r => r.items)
   if (allItems.length === 0) return null
-  const allMinX = Math.min(...allItems.map(i => i.x))
-  const allMaxX = Math.max(...allItems.map(i => i.x + i.w))
+  let allMinX = Infinity, allMaxX = -Infinity
+  for (const i of allItems) { if (i.x < allMinX) allMinX = i.x; const r = i.x + i.w; if (r > allMaxX) allMaxX = r }
   const pageSpan = allMaxX - allMinX
   if (pageSpan <= 0) return null
 
@@ -515,8 +516,8 @@ function assignRowItems(
   const usedCols = new Set<number>()
   // 그룹별 중심 X 계산
   const groupCenters = groups.map(g => {
-    const minX = Math.min(...g.map(i => i.x))
-    const maxX = Math.max(...g.map(i => i.x + i.w))
+    let minX = Infinity, maxX = -Infinity
+    for (const i of g) { if (i.x < minX) minX = i.x; const r = i.x + i.w; if (r > maxX) maxX = r }
     return (minX + maxX) / 2
   })
 

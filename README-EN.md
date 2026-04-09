@@ -26,12 +26,20 @@ Beyond simple text extraction, kordoc automates the **entire lifecycle of Korean
 
 ---
 
-## What's New in v2.2.0
+## What's New in v2.2.1
+
+- **🔧 Markdown Rendering Fix** — Escape GFM special characters (`~`) to prevent false strikethrough, escape `|` inside table cells, change nested table text delimiter from `|` to `/` to avoid GFM parser conflicts.
+- **📝 Paragraph Spacing** — Insert blank lines between paragraph blocks for proper markdown rendering as separate paragraphs.
+
+<details>
+<summary>v2.2.0 changes</summary>
 
 - **🛡️ Security Hardening (7 fixes)** — XLSX/DOCX Billion Laughs (XXE) prevention, Watch SSRF redirect/decimal-IP/symlink blocking, HWP5 lenient decompression bomb prevention, CFB FAT sector cap, buildTableDirect memory explosion prevention.
 - **💥 Crash Prevention** — Fixed `Math.min/max(...spread)` stack overflow (15 locations), Watch concurrency limit (MAX_CONCURRENT=3).
 - **🐛 Correctness** — Levenshtein same-length similarity=1.0 bug fix, MCP `parse_metadata` XLSX/DOCX misclassification fix, PDF font-size stats memory optimization (40MB → ~50 entries).
 - **📦 Quality** — CLI JSON Uint8Array base64 conversion, `isPathTraversal` false positive on legitimate filenames fixed.
+
+</details>
 
 <details>
 <summary>v2.1.0 changes</summary>

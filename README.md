@@ -27,12 +27,20 @@ HWP, HWPX, PDF, XLSX, DOCX — 관공서에서 쏟아지는 모든 문서를 파
 
 ---
 
-## v2.2.0 변경사항
+## v2.2.1 변경사항
+
+- **🔧 마크다운 렌더링 개선** — GFM 특수문자(`~`) 이스케이프로 취소선 오해석 방지, 테이블 셀 내 `|` 문자 이스케이프, 중첩 테이블 텍스트 구분자 `|` → `/` 변경으로 GFM 파서 충돌 방지.
+- **📝 문단 간격 정상화** — paragraph 블록 사이 빈 줄 삽입으로 마크다운에서 별도 문단으로 렌더링.
+
+<details>
+<summary>v2.2.0 변경사항</summary>
 
 - **🛡️ 보안 강화 7건** — XLSX/DOCX Billion Laughs(XXE) 방지, Watch SSRF 리다이렉트·10진수IP·symlink 차단, HWP5 lenient decompression bomb 방지, CFB FAT 섹터 상한, buildTableDirect 메모리 폭주 방지.
 - **💥 Crash 방지** — `Math.min/max(...spread)` 스택 오버플로 수정 (15개소), Watch 동시 처리 제한(MAX_CONCURRENT=3).
 - **🐛 정확성 개선** — Levenshtein 동일 길이 유사도 1.0 버그 수정, MCP `parse_metadata` XLSX/DOCX 오분류 수정, PDF 폰트 크기 통계 메모리 최적화(40MB→~50엔트리).
 - **📦 품질** — CLI JSON Uint8Array base64 변환, `isPathTraversal` 합법적 파일명 오탐 수정.
+
+</details>
 
 <details>
 <summary>v2.1.0 변경사항</summary>

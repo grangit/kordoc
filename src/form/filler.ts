@@ -1,7 +1,7 @@
 /** 양식 서식 필드 값 채우기 — IRBlock[] 기반 in-place 교체 */
 
 import type { IRBlock, IRTable, FormField } from "../types.js"
-import { extractFormFields } from "./recognize.js"
+import { isLabelCell } from "./recognize.js"
 
 /** 필드 채우기 결과 */
 export interface FillResult {
@@ -91,6 +91,9 @@ function fillTable(
       const labelCell = table.cells[r][c]
       const valueCell = table.cells[r][c + 1]
       if (!labelCell || !valueCell) continue
+
+      // 라벨 셀 검증 — isLabelCell이 아니면 데이터 셀이므로 스킵
+      if (!isLabelCell(labelCell.text)) continue
 
       const normalizedCellLabel = normalizeLabel(labelCell.text)
       if (!normalizedCellLabel) continue

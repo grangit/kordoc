@@ -432,17 +432,18 @@ server.tool(
         }
       }
 
-      // 2) 서식 필드 인식 (미리보기)
+      // 2) 서식 필드 인식 (미리보기 — 빈칸 포함)
       const formInfo = extractFormFields(result.blocks)
-      if (formInfo.fields.length === 0) {
+
+      // 3) 필드 채우기 (서식 필드가 0개여도 시도 — 테이블 라벨 직접 매칭)
+      const fillResult = fillFormFields(result.blocks, fields)
+
+      if (fillResult.filled.length === 0 && formInfo.fields.length === 0) {
         return {
           content: [{ type: "text", text: `서식 필드를 찾을 수 없습니다. 일반 문서이거나 서식 패턴이 감지되지 않았습니다.` }],
           isError: true,
         }
       }
-
-      // 3) 필드 채우기
-      const fillResult = fillFormFields(result.blocks, fields)
 
       // 4) 출력 생성
       const markdown = blocksToMarkdown(fillResult.blocks)
@@ -450,7 +451,7 @@ server.tool(
       const summary = [
         `채워진 필드: ${fillResult.filled.length}개`,
         fillResult.unmatched.length > 0 ? `매칭 실패: ${fillResult.unmatched.join(", ")}` : null,
-        `원본 서식 필드: ${formInfo.fields.length}개 (확신도 ${(formInfo.confidence * 100).toFixed(0)}%)`,
+        formInfo.fields.length > 0 ? `서식 필드: ${formInfo.fields.length}개 (확신도 ${(formInfo.confidence * 100).toFixed(0)}%)` : null,
       ].filter(Boolean).join(" | ")
 
       if (output_format === "hwpx") {

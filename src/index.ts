@@ -183,7 +183,7 @@ export async function fillForm(
 // ─── 게임체인저 API ─────────────────────────────────
 
 export { compare, diffBlocks } from "./diff/compare.js"
-export { extractFormFields } from "./form/recognize.js"
+export { extractFormFields, isLabelCell } from "./form/recognize.js"
 export { fillFormFields } from "./form/filler.js"
 export type { FillResult } from "./form/filler.js"
 export { markdownToHwpx } from "./hwpx/generator.js"

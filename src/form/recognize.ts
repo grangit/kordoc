@@ -13,7 +13,7 @@ const LABEL_KEYWORDS = new Set([
 ])
 
 /** 라벨처럼 보이는 셀인지 판별 */
-function isLabelCell(text: string): boolean {
+export function isLabelCell(text: string): boolean {
   const trimmed = text.trim()
   if (!trimmed || trimmed.length > 30) return false
   // 키워드 매칭
@@ -68,7 +68,7 @@ function extractFromTable(table: IRTable): FormField[] {
       for (let c = 0; c < table.cols - 1; c++) {
         const labelCell = table.cells[r][c]
         const valueCell = table.cells[r][c + 1]
-        if (isLabelCell(labelCell.text) && valueCell.text.trim()) {
+        if (isLabelCell(labelCell.text)) {
           fields.push({
             label: labelCell.text.trim().replace(/[:：]\s*$/, ""),
             value: valueCell.text.trim(),

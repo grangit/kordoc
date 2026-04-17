@@ -31,17 +31,49 @@ export function extractTextViaCom(filePath: string): { pages: string[]; pageCoun
   }
 
   // PowerShell 스크립트를 인라인으로 실행
-  // - RegisterModule: 보안 경고 억제
+  // - RegisterModule: 보안 경고 억제 (DLL 미등록 환경에서 silent fail)
+  // - SetMessageBoxMode: 내부 메시지박스 자동 응답
+  // - 백그라운드 워처 runspace: FilePathChecker 다이얼로그(#32770 "한글")를
+  //   감지하는 즉시 Enter 전송하여 기본 버튼 "접근 허용(Y)" 자동 클릭
   // - GetPageText: DRM 우회 텍스트 추출
   // filePath를 single-quote로 이스케이프 (내부 ' → '')
   const escaped = filePath.replace(/'/g, "''")
   const ps1 = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
+
+Add-Type -Namespace HwpAuto -Name Win -MemberDefinition @'
+[DllImport("user32.dll", CharSet=CharSet.Unicode)]
+public static extern System.IntPtr FindWindow(string lpClassName, string lpWindowName);
+[DllImport("user32.dll")]
+public static extern bool PostMessage(System.IntPtr hWnd, uint Msg, System.IntPtr wParam, System.IntPtr lParam);
+[DllImport("user32.dll")]
+public static extern bool IsWindowVisible(System.IntPtr hWnd);
+'@ -ErrorAction SilentlyContinue
+
+# 한글 보안 경고 다이얼로그 자동 닫기 워처 (별도 runspace)
+$rs = [runspacefactory]::CreateRunspace()
+$rs.Open()
+$ps = [powershell]::Create()
+$ps.Runspace = $rs
+[void]$ps.AddScript({
+  $endAt = (Get-Date).AddSeconds(150)
+  while ((Get-Date) -lt $endAt) {
+    # #32770 = 표준 Win32 다이얼로그 클래스, 타이틀 '한글' = 보안 경고 팝업
+    $h = [HwpAuto.Win]::FindWindow('#32770', '한글')
+    if ($h -ne [IntPtr]::Zero -and [HwpAuto.Win]::IsWindowVisible($h)) {
+      # WM_KEYDOWN (0x100) / WM_KEYUP (0x101) + VK_RETURN (0x0D) = 기본 버튼 클릭
+      [void][HwpAuto.Win]::PostMessage($h, 0x100, [IntPtr]0x0D, [IntPtr]0)
+      Start-Sleep -Milliseconds 30
+      [void][HwpAuto.Win]::PostMessage($h, 0x101, [IntPtr]0x0D, [IntPtr]0)
+    }
+    Start-Sleep -Milliseconds 120
+  }
+})
+$async = $ps.BeginInvoke()
+
 try {
   $hwp = New-Object -ComObject HWPFrame.HwpObject
-  # 보안 경고/메시지박스 전체 자동 응답 (RegisterModule만으로는 불충분한 환경 대응)
-  # 상위 16비트 = 대상 메시지박스 플래그(0xFFFF = 전체), 하위 16비트 = 자동 응답(0x1 = Yes/OK)
   try { $hwp.SetMessageBoxMode(0xFFFF0001) | Out-Null } catch { }
   $hwp.RegisterModule('FilePathCheckerModule', 'FilePathCheckerModuleExample') | Out-Null
   $hwp.Open('${escaped}', '', '') | Out-Null
@@ -56,6 +88,11 @@ try {
   $result | ConvertTo-Json -Depth 3 -Compress
 } catch {
   @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
+} finally {
+  try { $ps.Stop() | Out-Null } catch {}
+  try { $ps.Dispose() } catch {}
+  try { $rs.Close() } catch {}
+  try { $rs.Dispose() } catch {}
 }
 `
 

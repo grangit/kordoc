@@ -19,6 +19,7 @@ program
   .option("-p, --pages <range>", "페이지/섹션 범위 (예: 1-3, 1,3,5)")
   .option("--format <type>", "출력 형식: markdown (기본) 또는 json", "markdown")
   .option("--no-header-footer", "PDF 머리글/바닥글 자동 제거")
+  .option("--formula-ocr", "PDF 수식 OCR 활성화 (MFD+MFR ONNX, 첫 사용 시 모델 ~155MB 자동 다운로드)")
   .option("--silent", "진행 메시지 숨기기")
   .action(async (files: string[], opts) => {
     const validFormats = ["markdown", "json"]
@@ -50,6 +51,7 @@ program
         const parseOptions: ParseOptions = { filePath: absPath }
         if (opts.pages) parseOptions.pages = opts.pages as string
         if (opts.headerFooter === false) parseOptions.removeHeaderFooter = false
+        if (opts.formulaOcr) parseOptions.formulaOcr = true
         if (!opts.silent) {
           parseOptions.onProgress = (current: number, total: number) => {
             process.stderr.write(`\r[kordoc] ${filePrefix}${fileName} (${format}) [${current}/${total}]`)
@@ -293,6 +295,62 @@ program
   .action(async () => {
     const { runSetup } = await import("./setup.js")
     await runSetup()
+  })
+
+program
+  .command("check-formula-models")
+  .description("PDF 수식 OCR 모델(MFD + MFR + tokenizer, ~155MB) 상태 확인 — 없거나 SHA 불일치면 다운로드")
+  .option("--status-only", "상태만 JSON 으로 출력 (다운로드 안 함)")
+  .action(async (opts) => {
+    try {
+      const { getFormulaModelStatus, ensureFormulaModels, getFormulaModelsDir } = await import(
+        "./pdf/formula/index.js"
+      )
+      const dir = getFormulaModelsDir()
+      if (opts.statusOnly) {
+        const status = await getFormulaModelStatus()
+        process.stdout.write(
+          JSON.stringify(
+            {
+              modelsDir: dir,
+              allReady: status.every((s) => s.verified),
+              models: status.map((s) => ({
+                name: s.spec.name,
+                filename: s.spec.filename,
+                sizeMb: s.spec.sizeMb,
+                exists: s.exists,
+                verified: s.verified,
+                invalidReason: s.invalidReason,
+                path: s.localPath,
+              })),
+            },
+            null,
+            2,
+          ) + "\n",
+        )
+        return
+      }
+      process.stderr.write(`[kordoc-formula] 캐시 디렉토리: ${dir}\n`)
+      await ensureFormulaModels((p) => {
+        if (p.phase === "download" && p.total) {
+          const pct = Math.floor((p.downloaded / p.total) * 100)
+          process.stderr.write(
+            `\r[kordoc-formula] ${p.spec.name} ${pct}% (${(p.downloaded / 1024 / 1024).toFixed(1)}/${(p.total / 1024 / 1024).toFixed(1)}MB)`,
+          )
+          if (p.downloaded >= p.total) process.stderr.write("\n")
+        } else if (p.phase === "verify") {
+          process.stderr.write(`[kordoc-formula] ${p.spec.name} SHA-256 검증 중...\n`)
+        } else if (p.phase === "done") {
+          process.stderr.write(`[kordoc-formula] ${p.spec.name} 준비 완료\n`)
+        } else if (p.phase === "skip") {
+          process.stderr.write(`[kordoc-formula] ${p.spec.name} 이미 존재 (skip)\n`)
+        }
+      })
+      process.stdout.write("ok\n")
+    } catch (err) {
+      process.stderr.write(`[kordoc] 수식 모델 준비 실패: ${sanitizeError(err)}\n`)
+      process.exit(1)
+    }
   })
 
 program.parse()

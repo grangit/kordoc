@@ -124,6 +124,21 @@ export interface ParseOptions {
   removeHeaderFooter?: boolean
   /** 원본 파일 경로 (DRM COM fallback에 필요, 내부 전용) */
   filePath?: string
+  /**
+   * PDF 수식 OCR 활성화 (기본 false).
+   *
+   * 활성화 시 각 PDF 페이지를 이미지로 렌더링 → YOLOv8 기반 수식 영역 검출 →
+   * TrOCR 기반 LaTeX 인식. 감지된 수식은 `$...$` (inline) / `$$...$$` (display) 로
+   * 블록 텍스트에 삽입된다.
+   *
+   * 필수 optional 의존성: `onnxruntime-node`, `@huggingface/transformers`,
+   * `@hyzyla/pdfium`, `sharp`. 미설치 시 parse 에 실패하지 않고 **경고만** 남기고
+   * 수식 인식은 skip 한다 (일반 텍스트 추출은 정상 동작).
+   *
+   * 모델(~155MB) 은 첫 사용 시 HuggingFace 에서 자동 다운로드 되어
+   * `~/.cache/kordoc/models/pix2text/` 에 SHA-256 검증과 함께 저장된다.
+   */
+  formulaOcr?: boolean
 }
 
 // ─── 파싱 경고 ──────────────────────────────────────

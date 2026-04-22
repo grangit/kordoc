@@ -101,3 +101,30 @@ Modifications:
 - TypeScript rewrite from Rust
 - Added sector size validation, chain length limits, and cycle detection
 - Pure JS AES-128 ECB implementation (no native dependency)
+
+================================================================================
+
+Pix2Text — Mathematical Formula Detection & Recognition
+https://github.com/breezedeus/Pix2Text
+
+Copyright 2023-2024 breezedeus
+MFD (Mathematical Formula Detection): trained on Ultralytics YOLOv8 — MFD model
+weights themselves are distributed under MIT via the HuggingFace repository
+`breezedeus/pix2text-mfd`, but the underlying YOLOv8 architecture carries an
+AGPL-3.0 license from Ultralytics. Users distributing derivative works built on
+MFD outputs should review Ultralytics' licensing terms.
+MFR (Mathematical Formula Recognition): HuggingFace `breezedeus/pix2text-mfr`,
+MIT License.
+
+Used in:
+- src/pdf/formula/detector.ts — YOLOv8 letterbox preprocessing, NMS post-processing
+- src/pdf/formula/recognizer.ts — DeiT encoder + TrOCR decoder greedy decoding
+- src/pdf/formula/postprocess.ts — LaTeX output cleanup (derived from Pix2Text
+  `latex_ocr.py` post_process)
+
+Models are downloaded at runtime from HuggingFace with SHA-256 verification.
+No model weights are redistributed with this package. Algorithm implementations
+are original TypeScript ports referencing the Pix2Text algorithm descriptions.
+
+You may obtain a copy of the MIT License at:
+https://opensource.org/licenses/MIT

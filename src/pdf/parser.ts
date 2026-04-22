@@ -70,6 +70,9 @@ interface NormItem {
 }
 
 export async function parsePdfDocument(buffer: ArrayBuffer, options?: ParseOptions): Promise<InternalParseResult> {
+  // pdfjs-dist 는 전달받은 buffer 의 underlying storage 를 detach 할 수 있다.
+  // 수식 OCR 은 같은 버퍼를 재사용해야 하므로 옵션 on 일 때만 clone 을 보관.
+  const formulaBuffer: ArrayBuffer | null = options?.formulaOcr ? buffer.slice(0) : null
   const doc = await loadPdfWithTimeout(buffer)
 
   try {
@@ -161,6 +164,19 @@ export async function parsePdfDocument(buffer: ArrayBuffer, options?: ParseOptio
       // 필터링된 블록 제거 (뒤에서부터 삭제)
       for (let ri = removed.length - 1; ri >= 0; ri--) {
         blocks.splice(removed[ri], 1)
+      }
+    }
+
+    // 수식 OCR (선택) — 기본 텍스트 추출과 별개로 페이지 이미지 렌더 후 수식만 검출/인식.
+    // 실패 시 경고만 기록하고 일반 텍스트 추출 결과는 그대로 반환한다.
+    if (options?.formulaOcr && formulaBuffer) {
+      try {
+        await applyFormulaOcr(formulaBuffer, blocks, pageFilter, effectivePageCount, warnings, options.onProgress)
+      } catch (e) {
+        warnings.push({
+          message: `수식 OCR 실패: ${e instanceof Error ? e.message : String(e)}`,
+          code: "PARTIAL_PARSE",
+        })
       }
     }
 
@@ -1629,4 +1645,110 @@ function mergeKoreanLines(text: string): string {
     }
   }
   return result.join("\n")
+}
+
+// ═══════════════════════════════════════════════════════
+// 수식 OCR 통합 (optional)
+// ═══════════════════════════════════════════════════════
+
+/**
+ * 수식 OCR 을 적용하여 blocks 에 formula paragraph 를 삽입한다.
+ *
+ * 삽입 위치: 각 페이지의 해당 pageNumber 를 가진 마지막 블록 뒤.
+ * 한 페이지 내 여러 수식은 검출된 읽기 순서(위→아래, 왼→오른쪽)를 유지한다.
+ *
+ * 실패한 수식(latex === "")은 삽입하지 않는다.
+ *
+ * @param buffer 원본 PDF 버퍼
+ * @param blocks in-place 수정되는 IR 블록 배열 (해당 페이지 마지막 위치에 수식 삽입)
+ * @param pageFilter null 이면 전체, Set 이면 포함된 페이지만 처리
+ * @param effectivePageCount 실제 페이지 범위 상한
+ * @param warnings 경고 기록용
+ * @param onProgress 페이지별 진행률 콜백 (text 파싱과 합산되지는 않음 — 수식 단계 별도)
+ */
+async function applyFormulaOcr(
+  buffer: ArrayBuffer,
+  blocks: IRBlock[],
+  pageFilter: Set<number> | null,
+  effectivePageCount: number,
+  warnings: ParseWarning[],
+  _onProgress?: (current: number, total: number) => void,
+): Promise<void> {
+  const formulaMod = await import("./formula/index.js")
+  const { FormulaPipeline, ensureFormulaModels } = formulaMod
+
+  // 모델 준비 — 없으면 자동 다운로드. 진행률은 stderr 로 출력.
+  await ensureFormulaModels((p) => {
+    if (p.phase === "download" && p.total) {
+      const pct = Math.floor((p.downloaded / p.total) * 100)
+      process.stderr.write(`\r[kordoc-formula] ${p.spec.name} ${pct}% (${formatMb(p.downloaded)}/${formatMb(p.total)})`)
+      if (p.downloaded >= p.total) process.stderr.write("\n")
+    } else if (p.phase === "verify") {
+      process.stderr.write(`[kordoc-formula] ${p.spec.name} SHA-256 검증 중...\n`)
+    } else if (p.phase === "done") {
+      process.stderr.write(`[kordoc-formula] ${p.spec.name} 준비 완료\n`)
+    } else if (p.phase === "skip") {
+      // 조용히 스킵
+    }
+  })
+
+  const pipeline = await FormulaPipeline.create()
+  try {
+    const pagesResult = await pipeline.runOnBuffer(buffer, pageFilter)
+
+    if (pagesResult.length === 0) return
+
+    let insertedCount = 0
+
+    // 각 페이지별로 수식 블록을 기존 블록 배열에 삽입
+    for (const page of pagesResult) {
+      const pageNumber = page.pageNumber
+
+      // 해당 페이지의 마지막 블록 인덱스 찾기
+      let lastIdx = -1
+      for (let i = 0; i < blocks.length; i++) {
+        if (blocks[i].pageNumber === pageNumber) lastIdx = i
+      }
+
+      // 삽입할 수식 paragraph 블록들 (latex 있는 것만)
+      const formulaBlocks: IRBlock[] = []
+      for (const r of page.regions) {
+        if (!r.latex || !r.latex.trim()) continue
+        const wrapped = r.kind === "display" ? `$$${r.latex}$$` : `$${r.latex}$`
+        formulaBlocks.push({
+          type: "paragraph",
+          text: wrapped,
+          pageNumber,
+          bbox: {
+            page: pageNumber,
+            // pdfium 픽셀 좌표를 PDF 포인트로 근사 (scale=2 가정; 정확하진 않지만 삽입 순서용)
+            x: r.bbox.x1 / 2,
+            y: r.bbox.y1 / 2,
+            width: (r.bbox.x2 - r.bbox.x1) / 2,
+            height: (r.bbox.y2 - r.bbox.y1) / 2,
+          },
+        })
+      }
+
+      if (formulaBlocks.length === 0) continue
+
+      if (lastIdx === -1) {
+        // 해당 페이지에 텍스트 블록이 하나도 없으면 맨 끝에 추가
+        blocks.push(...formulaBlocks)
+      } else {
+        blocks.splice(lastIdx + 1, 0, ...formulaBlocks)
+      }
+      insertedCount += formulaBlocks.length
+    }
+
+    if (insertedCount > 0) {
+      process.stderr.write(`[kordoc-formula] ${insertedCount}개 수식 삽입 (${pagesResult.length}개 페이지)\n`)
+    }
+  } finally {
+    await pipeline.destroy().catch(() => {})
+  }
+}
+
+function formatMb(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`
 }

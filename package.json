@@ -1,6 +1,6 @@
 {
   "name": "kordoc",
-  "version": "2.5.3",
+  "version": "2.6.0",
   "description": "Parse Korean documents (HWP, HWPX, HWPML, PDF, XLSX, DOCX) to Markdown",
   "type": "module",
   "exports": {
@@ -67,9 +67,19 @@
       "optional": true
     }
   },
+  "optionalDependencies": {
+    "@hyzyla/pdfium": "^2.1.0",
+    "onnxruntime-node": "^1.24.0",
+    "sharp": "^0.34.0",
+    "@huggingface/transformers": "^4.1.0"
+  },
   "devDependencies": {
+    "@hyzyla/pdfium": "^2.1.0",
+    "@huggingface/transformers": "^4.1.0",
     "@types/node": "^18.19.130",
+    "onnxruntime-node": "^1.24.0",
     "pdfjs-dist": "^4.10.38",
+    "sharp": "^0.34.0",
     "tsup": "^8.4.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.0"

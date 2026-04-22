@@ -14,6 +14,7 @@ import {
   fixLatexSpacing,
   isTrivialFormula,
   normalizeFormulaSpacing,
+  hasHighRepetition,
 } from "../src/pdf/formula/postprocess.js"
 import { __internal } from "../src/pdf/formula/detector.js"
 
@@ -177,6 +178,166 @@ describe("isTrivialFormula", () => {
       false,
     )
     assert.equal(isTrivialFormula("\\frac{1}{\\sqrt{d_{k}}}"), false)
+  })
+
+  it("substring 반복 패턴 trivial (arxiv OCR garbage)", () => {
+    // \alpha_{N}= 반복
+    assert.equal(
+      isTrivialFormula(
+        "\\alpha_{1}=\\alpha_{2}=\\alpha_{3}=\\alpha_{4}=\\alpha_{4}=\\alpha_{4}=\\alpha_{4}",
+      ),
+      true,
+    )
+    // \mathcal{P}_{c} 반복
+    assert.equal(
+      isTrivialFormula(
+        "c=c_{c}\\in\\mathcal{P}_{c}\\cdots\\in\\mathcal{P}_{c}\\in\\mathcal{P}_{c}\\in\\mathcal{P}_{c}",
+      ),
+      true,
+    )
+    // \omega_{n}^{\prime} 반복
+    assert.equal(
+      isTrivialFormula(
+        "\\omega_{n}^{\\prime}=\\omega_{n}^{\\prime}+\\omega_{n}^{\\prime}=\\omega_{n}^{\\prime}+\\omega_{n}^{\\prime}=\\omega_{n}^{\\prime}+\\omega_{n}^{\\prime}",
+      ),
+      true,
+    )
+    // c_{c}^{\prime}\phi_{c}^{\prime} 반복
+    assert.equal(
+      isTrivialFormula(
+        "c=c_{c}^{\\prime}\\phi_{c}^{\\prime}=c_{c}^{\\prime}\\phi_{c}^{\\prime}=c_{c}^{\\prime}\\phi_{c}^{\\prime}=c_{c}^{\\prime}\\phi_{c}^{\\prime}",
+      ),
+      true,
+    )
+  })
+
+  it("정상 수식은 반복 필터에 걸리지 않음", () => {
+    // 반복 있어도 정당한 경우
+    assert.equal(isTrivialFormula("x^{2}+y^{2}=z^{2}"), false)
+    assert.equal(
+      isTrivialFormula("d_{k}=d_{v}=d_{\\mathrm{model}}/h=64"),
+      false,
+    )
+    assert.equal(
+      isTrivialFormula(
+        "\\mathrm{Attention}(Q,K,V)=\\mathrm{softmax}(\\frac{QK^{T}}{\\sqrt{d_{k}}})V",
+      ),
+      false,
+    )
+    // MultiHead aligned
+    assert.equal(
+      isTrivialFormula(
+        "\\begin{aligned}{\\mathrm{MultiHead}(Q,K,V)}&{=\\mathrm{Concat}(\\mathrm{head}_{1},...,\\mathrm{head}_{h})W^{O}}\\end{aligned}",
+      ),
+      false,
+    )
+  })
+
+  it("\\square placeholder trivial (MFR 인식 실패 마커)", () => {
+    assert.equal(isTrivialFormula("W^{\\square}\\in\\prod_{\\mathbb{R}}h"), true)
+    assert.equal(isTrivialFormula("a + \\square"), true)
+  })
+
+  it("단독 숫자/실수 trivial", () => {
+    assert.equal(isTrivialFormula("1.0"), true)
+    assert.equal(isTrivialFormula("42"), true)
+    assert.equal(isTrivialFormula("-3.14"), true)
+    assert.equal(isTrivialFormula("{4000}"), true)
+    // 변수 동반 숫자는 정상
+    assert.equal(isTrivialFormula("x=1.0"), false)
+    assert.equal(isTrivialFormula("steps=4000"), false)
+  })
+
+  it("동일 괄호 그룹 중복 trivial", () => {
+    assert.equal(isTrivialFormula("C(T_{2})(T_{2})"), true)
+    assert.equal(isTrivialFormula("{k_{c}}{k_{c}}"), true)
+    // 다른 인자는 정상
+    assert.equal(isTrivialFormula("C(T_{2})(T_{1})"), false)
+  })
+
+  it("\\frac{X}{X} 분자=분모 trivial", () => {
+    assert.equal(isTrivialFormula("\\frac{\\eta}{\\eta}"), true)
+    assert.equal(isTrivialFormula("k<\\frac{\\eta}{\\eta}"), true)
+    // 다른 분자/분모는 정상
+    assert.equal(isTrivialFormula("\\frac{a}{b}"), false)
+    assert.equal(isTrivialFormula("\\frac{QK^{T}}{\\sqrt{d_{k}}}"), false)
+  })
+
+  it("동일 함수 인자 반복 trivial", () => {
+    assert.equal(isTrivialFormula("C(\\tau_{2},\\mu^{\\prime},\\mu^{\\prime})"), true)
+    assert.equal(isTrivialFormula("f(x,x,x)"), true)
+    // 서로 다른 인자는 정상
+    assert.equal(isTrivialFormula("f(x,y,z)"), false)
+    assert.equal(isTrivialFormula("\\mathrm{Attention}(Q,K,V)"), false)
+  })
+
+  it("matrix placeholder (\\begin{matrix} + \\cdots 반복) trivial", () => {
+    assert.equal(
+      isTrivialFormula(
+        "\\partial\\left(\\begin{matrix}{k_{c}}&{\\cdots}\\\\\\end{matrix}\\right)=ct\\to\\partial\\begin{matrix}{r_{c}}&{\\cdots}\\\\{r_{c}}&{\\cdots}",
+      ),
+      true,
+    )
+    // \cdots 1회는 정당 (표현식에 실제 값 있음)
+    assert.equal(
+      isTrivialFormula("\\begin{matrix}a&b\\\\c&\\cdots\\end{matrix}"),
+      false,
+    )
+  })
+
+  it("비정상 변수명 (\\mathrm{긴단어} 2-3자 접두) trivial", () => {
+    assert.equal(isTrivialFormula("cl_{\\mathrm{model}}"), true)
+    assert.equal(isTrivialFormula("to_{\\mathrm{max}}"), true)
+    // 단일 문자는 정상
+    assert.equal(isTrivialFormula("d_{\\mathrm{model}}"), false)
+    assert.equal(isTrivialFormula("W_{\\mathrm{out}}"), false)
+  })
+
+  it("\\mathsf/\\mathtt/\\texttt 포함 trivial (다이어그램 타이포그래피)", () => {
+    assert.equal(isTrivialFormula("\\mathtt{Welgnt}"), true)
+    assert.equal(isTrivialFormula("\\mathsf{Tr}_{s}"), true)
+    assert.equal(isTrivialFormula("\\exists\\texttt{wg}\\in\\texttt{w}"), true)
+  })
+
+  it("\\begin{aligned} + 등호 없음 trivial", () => {
+    assert.equal(
+      isTrivialFormula(
+        "\\begin{aligned}{\\exists\\times\\Xi^{3}\\subset\\partial\\cap\\Xi^{\\prime}}\\end{aligned}",
+      ),
+      true,
+    )
+    // 등호 있으면 유지
+    assert.equal(
+      isTrivialFormula(
+        "\\begin{aligned}a&=b\\\\c&=d\\end{aligned}",
+      ),
+      false,
+    )
+  })
+
+  it("\\begin{matrix} + \\downarrow 반복 trivial (architecture diagram)", () => {
+    assert.equal(
+      isTrivialFormula(
+        "\\begin{matrix}3\\times3,512\\\\\\downarrow\\\\\\downarrow\\end{matrix}",
+      ),
+      true,
+    )
+  })
+
+  it("\\mathrm{word} 이항 연산자 단일 패턴 trivial", () => {
+    assert.equal(isTrivialFormula("\\mathrm{to}-\\infty"), true)
+    assert.equal(isTrivialFormula("\\mathrm{up}+1"), true)
+    // 실제 연산 수식은 유지
+    assert.equal(isTrivialFormula("\\mathrm{sin}(x)+1"), false)
+  })
+
+  it("hasHighRepetition 직접 검증", () => {
+    assert.equal(hasHighRepetition("short"), false)
+    assert.equal(
+      hasHighRepetition("\\alpha_{4}=\\alpha_{4}=\\alpha_{4}=\\alpha_{4}"),
+      true,
+    )
+    assert.equal(hasHighRepetition("x^{2}+y^{2}=z^{2}"), false)
   })
 
   it("postProcessLatex 가 trivial 시 빈 문자열 반환", () => {

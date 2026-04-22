@@ -257,6 +257,112 @@ export function isTrivialFormula(s: string): boolean {
     if (!hasOpOrNum) return true
   }
 
+  // 6) substring 반복 패턴 — 동일 5~15자 substring 이 3회 이상 + 커버리지 60%+
+  //    (e.g. "\\alpha_{1}=\\alpha_{2}=\\alpha_{3}=..." 의 `\\alpha_{` 반복,
+  //           "c_{c}^{\\prime}\\phi_{c}^{\\prime}=c_{c}^{\\prime}..." 의 `c_{c}^{\\prime}` 반복)
+  if (hasHighRepetition(t)) return true
+
+  // 7) MFR placeholder 인 `\square` 포함 — 인식 실패 영역을 `\square` 로 대체하는 특성
+  //    정당한 수식에 `\square` 가 나오는 경우는 거의 없음 (대부분 `\Box`, `\blacksquare` 등 사용)
+  if (t.includes("\\square")) return true
+
+  // 8) 단독 숫자/실수 (e.g. "$1.0$", "$42$", "$-3.14$")
+  //    공백/중괄호/백슬래시 제거 후 순수 숫자/부호/소수점만 남으면 trivial
+  if (/^[-+]?\d+\.?\d*$/.test(t.replace(/[\s{}\\]/g, ""))) return true
+
+  // 9) `(X)(X)` 또는 `{X}{X}` 연속 중복 — 동일 그룹 반복 (e.g. "$C(T_{2})(T_{2})$")
+  //    한 단계 중첩 허용: `{k_{c}}` 같이 내부에 `{...}` 하나 포함 가능.
+  if (/(\([^()]{2,15}\))\s*\1/.test(t)) return true
+  if (/(\{(?:[^{}]|\{[^{}]*\})+\})\s*\1/.test(t)) return true
+
+  // 10) 동일 인자 반복 — 괄호 인자 중 쉼표 구분 3개 중 2개 이상 동일 (e.g. `C(\tau_{2},\mu^{\prime},\mu^{\prime})`)
+  //     완전 일치 인자가 2회+ 반복이면 OCR 반복 오류로 간주
+  const argMatch = t.match(/^[A-Za-z\\][A-Za-z]*\(([^()]+)\)$/)
+  if (argMatch) {
+    const args = argMatch[1].split(",").map((a) => a.trim())
+    if (args.length >= 2) {
+      const freq = new Map<string, number>()
+      for (const a of args) if (a) freq.set(a, (freq.get(a) ?? 0) + 1)
+      for (const [, c] of freq) {
+        if (c >= 2 && c / args.length >= 0.5) return true
+      }
+    }
+  }
+
+  // 11) X/X 또는 \frac{X}{X} — 분자=분모 = 1, 의미 없는 수식
+  //     수식 **어디에나** 나타나면 trivial (e.g. "$k<\\frac{\\eta}{\\eta}$" 도 포함)
+  //     정당한 수식에서 $\\frac{a}{a}$ 를 쓰는 경우는 거의 없음 (대수적으로 1).
+  if (/\\frac\{([^{}]+)\}\{\1\}/.test(t)) return true
+  // X/X 꼴 (단일 변수 또는 \cmd)
+  if (/(\\[A-Za-z]+|\b[A-Za-z])\s*\/\s*\1\b/.test(t)) return true
+
+  // 12) `\begin{matrix}` 내부 `\cdots` 여러 번 — MFR 이 다이어그램/표를 matrix 로 오인식
+  //     본문 수식의 matrix 는 구체적 원소가 있어 `\cdots` 가 2회 이상 나오는 경우 거의 없음
+  if (/\\begin\{(?:matrix|pmatrix|bmatrix|vmatrix)\}/.test(t)) {
+    const cdotsCount = (t.match(/\\cdots/g) ?? []).length
+    if (cdotsCount >= 2) return true
+  }
+
+  // 13) 다이어그램 텍스트 레이블 — `\mathrm{word}` 가 2회+ 포함된 짧은 식 (토큰 수 ≤ 12)
+  //     또는 `[a-z]{1,3}_\{\mathrm{word}\}` 꼴의 비정상 변수명 (e.g. `cl_{\mathrm{model}}`)
+  if (tokens.length <= 12) {
+    const mathrmCount = (t.match(/\\mathrm\{/g) ?? []).length
+    if (mathrmCount >= 2) {
+      // 연산자/등호/숫자가 거의 없어 "단순 레이블" 로 보이는지 추가 확인
+      const hasRealMath = /[=+\-*/<>^]/.test(t) && /\d/.test(t)
+      if (!hasRealMath) return true
+    }
+  }
+  // 비정상 변수명: 2-3자 영문 접두 + _{\mathrm{긴단어}} 단독 (e.g. `cl_{\mathrm{model}}`, `to_{\mathrm{max}}`)
+  // 정상 변수명은 보통 단일 문자 (`d_{\mathrm{model}}`, `W_{i}`) — 2자 이상이면 다이어그램 오인식
+  if (/^[a-zA-Z]{2,3}_\{\\mathrm\{[a-zA-Z]{3,}\}\}$/.test(t)) return true
+
+  // 14) `\mathrm{word}` + 이항 연산자 + single 요소 꼴 — 다이어그램 "word → value" 레이블
+  //     (e.g. `\mathrm{to}-\infty`, `\mathrm{to}+\infty`)
+  if (/^\\mathrm\{[a-z]{2,}\}[-+][-+]?(?:\\[a-zA-Z]+|[a-zA-Z0-9])$/.test(t)) return true
+
+  // 15) `\mathsf`, `\mathtt`, `\texttt` 는 본문 수식에 거의 쓰이지 않고 다이어그램 타이포그래피 오인식이 대부분
+  //     — 포함만으로 trivial (e.g. `\mathtt{Welgnt}`, `\mathsf{Tr}_{s}`, `\texttt{wg}`)
+  if (/\\(?:mathsf|mathtt|texttt)\{/.test(t)) return true
+
+  // 16) `\begin{aligned}` 이지만 `=` 없음 — 정당한 aligned 는 항상 등호 포함 (여러 줄 equation)
+  //     등호 없으면 OCR garbage 조합
+  if (/\\begin\{aligned\}/.test(t) && !t.includes("=")) return true
+
+  // 17) `\begin{matrix}` + `\downarrow` 2회+ — 네트워크 architecture 다이어그램 오인식
+  if (/\\begin\{matrix\}/.test(t) && (t.match(/\\downarrow/g) ?? []).length >= 2) return true
+
+  return false
+}
+
+/**
+ * substring 반복 탐지 — 동일한 N자 substring 이 3회 이상 나타나고
+ * 그 반복 총 길이가 전체의 60% 이상이면 true.
+ *
+ * 5~15자 범위만 검사 (짧으면 정상 수식의 `^{2}` 같은 패턴도 걸림, 길면 노이즈 거의 없음).
+ * 영문자 포함 substring 만 검사 (구두점만 반복은 정상 수식에도 많음).
+ *
+ * 정당한 수식은 다양한 구조로 거의 겹치지 않아 false-positive 낮음.
+ */
+export function hasHighRepetition(s: string): boolean {
+  if (s.length < 15) return false
+
+  for (let len = 5; len <= 15; len++) {
+    // substring 길이 × 3회가 전체보다 길면 의미 없음
+    if (len * 3 > s.length) break
+    const seen = new Map<string, number>()
+    for (let i = 0; i <= s.length - len; i++) {
+      const sub = s.slice(i, i + len)
+      if (!/[a-zA-Z]/.test(sub)) continue
+      seen.set(sub, (seen.get(sub) ?? 0) + 1)
+    }
+    for (const [, count] of seen) {
+      if (count < 3) continue
+      // 겹치지 않는 점유율 추정: count*len (overlapping 포함이라 약간 과대)
+      // 보수적 판정 위해 최소 3회 + 60% 커버리지
+      if ((count * len) / s.length >= 0.6) return true
+    }
+  }
   return false
 }
 

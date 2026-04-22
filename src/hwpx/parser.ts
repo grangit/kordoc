@@ -15,6 +15,7 @@ import { KordocError, isPathTraversal, sanitizeHref, precheckZipSize, stripDtd }
 export { precheckZipSize } from "../utils.js"
 import { parsePageRange } from "../page-range.js"
 import { isComFallbackAvailable, isEncryptedHwpx, extractTextViaCom, comResultToParseResult } from "./com-fallback.js"
+import { hmlToLatex } from "./equation.js"
 
 /** 압축 해제 최대 크기 (100MB) — ZIP bomb 방지 */
 const MAX_DECOMPRESS_SIZE = 100 * 1024 * 1024
@@ -963,6 +964,23 @@ function extractParagraphInfo(para: Element, styleMap?: HwpxStyleMap): Paragraph
         case "shapeComment": case "drawText":
           break
 
+        // 수식: <hp:equation> 내부의 <hp:script> 에 HULK-style equation
+        // 스크립트가 담겨 있음. hml-equation-parser 로 LaTeX 변환 후 `$...$`
+        // 로 래핑. 실패/빈 스크립트면 무시 (대체 텍스트 누출 방지).
+        case "equation": {
+          const script = findChildByLocalName(child, "script")
+          const raw = script ? extractTextFromNode(script) : ""
+          if (raw.trim()) {
+            try {
+              const latex = hmlToLatex(raw).trim()
+              if (latex) text += " $" + latex + "$ "
+            } catch {
+              // 변환 실패 시 조용히 드롭 — 텍스트 품질이 우선
+            }
+          }
+          break
+        }
+
         // run 요소에서 charPrIDRef 추출
         case "r": {
           const runCharPr = child.getAttribute("charPrIDRef")
@@ -988,7 +1006,9 @@ function extractParagraphInfo(para: Element, styleMap?: HwpxStyleMap): Paragraph
   // 멀티라인으로 삽입된 OLE 대체 텍스트도 제거
   cleanText = cleanText.replace(/그림입니다\.?\s*원본\s*그림의\s*(이름|크기)[^\n]*(\n[^\n]*원본\s*그림의\s*(이름|크기)[^\n]*)*/g, "").trim()
   // HWP 도형/개체 대체텍스트 제거 ("사각형입니다.", "개체 입니다." 등)
-  cleanText = cleanText.replace(/(?:모서리가 둥근 |둥근 )?(?:사각형|직사각형|정사각형|원|타원|삼각형|선|직선|곡선|화살표|오각형|육각형|팔각형|별|십자|구름|마름모|도넛|평행사변형|사다리꼴|개체|그리기\s?개체|묶음\s?개체|글상자|수식|표|그림|OLE\s?개체)\s?입니다\.?/g, "").trim()
+  // NOTE: "수식" 은 제거 목록에서 빠져있음 — <hp:equation> 파싱으로 LaTeX 본문이 이미
+  // `$...$` 형태로 삽입되기 때문에 여기서 지울 alt-text 는 존재하지 않는다.
+  cleanText = cleanText.replace(/(?:모서리가 둥근 |둥근 )?(?:사각형|직사각형|정사각형|원|타원|삼각형|선|직선|곡선|화살표|오각형|육각형|팔각형|별|십자|구름|마름모|도넛|평행사변형|사다리꼴|개체|그리기\s?개체|묶음\s?개체|글상자|표|그림|OLE\s?개체)\s?입니다\.?/g, "").trim()
 
   // 스타일 정보 조회
   let style: InlineStyle | undefined
@@ -1005,6 +1025,19 @@ function extractParagraphInfo(para: Element, styleMap?: HwpxStyleMap): Paragraph
   }
 
   return { text: cleanText, href, footnote, style }
+}
+
+/** 자식 중 지정된 localName(접두사 제거)을 가진 첫 번째 Element 반환 */
+function findChildByLocalName(parent: Element, name: string): Element | null {
+  const children = parent.childNodes
+  if (!children) return null
+  for (let i = 0; i < children.length; i++) {
+    const ch = children[i] as Element
+    if (ch.nodeType !== 1) continue
+    const tag = (ch.tagName || ch.localName || "").replace(/^[^:]+:/, "")
+    if (tag === name) return ch
+  }
+  return null
 }
 
 /** 노드 내 모든 텍스트를 재귀적으로 추출 */

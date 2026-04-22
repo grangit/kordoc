@@ -13,6 +13,7 @@ import type {
 } from "../types.js"
 import { KordocError, precheckZipSize, stripDtd } from "../utils.js"
 import { blocksToMarkdown } from "../table/builder.js"
+import { ommlElementToLatex, isDisplayMath } from "./equation.js"
 
 /** ZIP 압축 해제 누적 최대 크기 (100MB) — ZIP bomb 방지 */
 const MAX_DECOMPRESS_SIZE = 100 * 1024 * 1024
@@ -194,6 +195,34 @@ function parseFootnotes(xml: string): Map<string, string> {
   return notes
 }
 
+// ─── OMML 수집 ────────────────────────────────────────
+
+/**
+ * paragraph 내부의 최상위 OMML 엘리먼트(`<m:oMath>` / `<m:oMathPara>`) 수집.
+ * `<m:oMathPara>` 안의 중첩 `<m:oMath>` 는 중복 제외.
+ */
+function collectOmmlRoots(p: Element): Element[] {
+  const out: Element[] = []
+  const walk = (node: Element) => {
+    const children = node.childNodes
+    if (!children) return
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
+      if (child.nodeType !== 1) continue
+      const el = child as Element
+      const tag = el.localName || el.tagName?.replace(/^[^:]+:/, "") || ""
+      if (tag === "oMath" || tag === "oMathPara") {
+        out.push(el)
+        // 내부는 재귀하지 않음 (oMathPara 안의 oMath 중복 방지)
+      } else {
+        walk(el)
+      }
+    }
+  }
+  walk(p)
+  return out
+}
+
 // ─── Run 텍스트 추출 ──────────────────────────────────
 
 interface RunResult {
@@ -298,7 +327,17 @@ function parseParagraph(
     if (result.text) parts.push(result.text)
   }
 
-  const text = parts.join("").trim()
+  // OMML 수식 — <m:oMath> / <m:oMathPara> 를 LaTeX 로 변환해 덧붙임.
+  // 인라인 수식은 `$...$`, display 는 `$$...$$`. 순서는 run 뒤로 몰리지만
+  // 대부분 한 단락 내 수식/텍스트가 분리돼 있어 실용상 무해.
+  for (const om of collectOmmlRoots(p)) {
+    const latex = ommlElementToLatex(om)
+    if (!latex) continue
+    if (isDisplayMath(om)) parts.push(" $$" + latex + "$$ ")
+    else parts.push(" $" + latex + "$ ")
+  }
+
+  const text = parts.join("").replace(/[ \t]{2,}/g, " ").trim()
   if (!text) return null
 
   // Heading 판별

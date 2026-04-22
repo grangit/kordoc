@@ -28,6 +28,29 @@ http://www.apache.org/licenses/LICENSE-2.0
 
 ================================================================================
 
+hml-equation-parser
+https://github.com/OpenBapul/hml-equation-parser
+
+Copyright 2018 Open Bapul
+Licensed under the Apache License, Version 2.0
+
+Used in:
+- src/hwpx/equation.ts — hmlToLatex() (HULK-style HWPX equation script →
+  LaTeX) derived from hulkEqParser.py and hulkReplaceMethod.py
+
+Modifications:
+- TypeScript rewrite from Python 3
+- Inlined convertMap.json as TS constants
+- Graceful error handling so failed conversion drops the equation rather
+  than leaking the HWP alt-text ("수식입니다") through the document
+
+See THIRD_PARTY/hml-equation-parser.LICENSE for the full license text.
+
+You may obtain a copy of the Apache License at:
+http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+
 cfb (Compound File Binary)
 https://github.com/SheetJS/js-cfb
 
